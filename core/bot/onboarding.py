@@ -124,6 +124,151 @@ async def _silent_delete(message: Message) -> None:
         log.warning("could not delete sensitive message %s", message.message_id)
 
 
+# ---------- step prompts ----------
+# Each prompt function sends the question for one onboarding step and
+# transitions the FSM into that step's state. Called by _ask_next() which
+# decides which step is next based on what's already in the DB / FSM data.
+
+async def _prompt_roles(message: Message, state: FSMContext) -> None:
+    await state.set_state(Onboarding.ROLES)
+    await message.answer(
+        "<b>Step 1/6</b> \u2014 What roles are you looking for? "
+        "Comma-separated, e.g.\n<code>python developer, backend engineer, ai engineer</code>"
+    )
+
+
+async def _prompt_locations(message: Message, state: FSMContext) -> None:
+    await state.set_state(Onboarding.LOCATIONS)
+    await message.answer(
+        "<b>Step 2/6</b> \u2014 Which locations? Comma-separated, e.g.\n"
+        "<code>Bengaluru, Hyderabad, Remote</code>"
+    )
+
+
+async def _prompt_name(message: Message, state: FSMContext) -> None:
+    await state.set_state(Onboarding.NAME)
+    await message.answer(
+        "<b>Step 3/6</b> \u2014 What's your full name? "
+        "This goes in the email signature recruiters see."
+    )
+
+
+async def _prompt_resume(message: Message, state: FSMContext) -> None:
+    await state.set_state(Onboarding.RESUME)
+    await message.answer(
+        "<b>Step 4/6</b> \u2014 Upload your resume as a PDF (max 10MB).\n"
+        "\n"
+        "Tip: on phone, tap the \U0001f4ce attachment icon \u2192 <b>File</b> \u2192 pick your PDF."
+    )
+
+
+async def _prompt_smtp_email(message: Message, state: FSMContext) -> None:
+    await state.set_state(Onboarding.SMTP_EMAIL)
+    await message.answer(
+        f"<b>Step 5/6</b> \u2014 Gmail address for sending outreach emails\n"
+        f"\n"
+        f"AutoApply sends from your own Gmail (via SMTP), so:\n"
+        f"\u2022 Recruiters see <i>your</i> name in their inbox\n"
+        f"\u2022 Replies land directly in <i>your</i> Gmail \u2014 we never see them\n"
+        f"\u2022 You get 500 emails/day quota (Gmail's normal limit)\n"
+        f"\n"
+        f"\u26a0\ufe0f <b>One small thing:</b> please use a Gmail with "
+        f"<b>2-Step Verification enabled</b>.\n"
+        f"\n"
+        f"<b>Why?</b> It's actually for <i>your</i> protection:\n"
+        f"\U0001f512 Keeps your Gmail account safe from break-ins\n"
+        f"\U0001f6e1\ufe0f Stops anyone (including us) from ever using your real password\n"
+        f"\u2705 Lets you generate an <b>App Password</b> \u2014 a separate, "
+        f"revocable key just for AutoApply\n"
+        f"\n"
+        f"<i>Your real Gmail password is never stored, seen, or even asked for. "
+        f"We only use the App Password, and you can revoke it from your Google "
+        f"account at any time.</i>\n"
+        f"\n"
+        f"<b>Haven't turned on 2-Step Verification yet?</b>\n"
+        f"\U0001f449 Enable it here (takes ~1 minute):\n"
+        f"    \u2192 https://myaccount.google.com/signinoptions/twosv\n"
+        f"\n"
+        f"Once that's done, send your Gmail address below \u2014 e.g. "
+        f"<code>you@gmail.com</code>.\n"
+        f"\n"
+        f"<i>Google Workspace email (you@yourcompany.com) also works as long "
+        f"as it's a Google-hosted mailbox with 2-Step Verification on.</i>",
+        disable_web_page_preview=True,
+    )
+
+
+async def _prompt_smtp_password(message: Message, state: FSMContext, *, smtp_email: str) -> None:
+    await state.set_state(Onboarding.SMTP_PASSWORD)
+    await message.answer(
+        f"\u2705 Got it: <b>{smtp_email}</b>\n\n"
+        f"<b>Step 6/6</b> \u2014 Gmail <b>app password</b> (16 chars)\n"
+        f"\n"
+        f"This lets AutoApply send mail from your Gmail without your real "
+        f"password. <b>It's not your Gmail login password.</b>\n"
+        f"\n"
+        f"<b>How to get it (2 min, one-time):</b>\n"
+        f"\n"
+        f"1\ufe0f\u20e3  Make sure 2-Step Verification is ON\n"
+        f"    \u2192 https://myaccount.google.com/security\n"
+        f"\n"
+        f"2\ufe0f\u20e3  Generate an app password\n"
+        f"    \u2192 https://myaccount.google.com/apppasswords\n"
+        f"    Name it <code>AutoApply</code>, copy the 16-character code.\n"
+        f"\n"
+        f"3\ufe0f\u20e3  Paste it here (spaces are fine; I'll strip them).\n"
+        f"\n"
+        f"\U0001f512 I'll delete your message and store the password encrypted. "
+        f"You can revoke it anytime from the same Google page.",
+        disable_web_page_preview=True,
+    )
+
+
+async def _ask_next(message: Message, state: FSMContext) -> None:
+    """Send the prompt for the next un-filled onboarding step.
+
+    Skips steps whose values are already in the DB (or already collected in
+    this wizard session via ``state.update_data``). If everything is filled,
+    finishes onboarding immediately. This is what makes /start and /restart
+    idempotent: a user who already entered their Gmail in a previous session
+    is NEVER asked for it again.
+    """
+    assert message.from_user is not None
+    user_id = message.from_user.id
+    data = await state.get_data()
+    async with get_session() as session:
+        prefs = await session.get(UserPreferences, user_id)
+        creds = await session.get(UserCredentials, user_id)
+
+    # Step 1 \u2014 roles
+    if not (data.get("roles") or (prefs and prefs.role_keywords)):
+        await _prompt_roles(message, state)
+        return
+    # Step 2 \u2014 locations
+    if not (data.get("locations") or (prefs and prefs.locations)):
+        await _prompt_locations(message, state)
+        return
+    # Step 3 \u2014 candidate name
+    if not (data.get("candidate_name") or (creds and creds.candidate_name)):
+        await _prompt_name(message, state)
+        return
+    # Step 4 \u2014 resume
+    if not (data.get("resume_pdf") or (creds and creds.resume_pdf)):
+        await _prompt_resume(message, state)
+        return
+    # Step 5 \u2014 SMTP email
+    if not (creds and creds.smtp_email):
+        await _prompt_smtp_email(message, state)
+        return
+    # Step 6 \u2014 SMTP app password (encrypted blob in DB)
+    if not (creds and creds.smtp_password_encrypted):
+        await _prompt_smtp_password(message, state, smtp_email=creds.smtp_email)
+        return
+
+    # Nothing missing \u2014 mark active without re-asking anything.
+    await _finish_onboarding(message, state)
+
+
 # ---------- handlers ----------
 @router.message(CommandStart(deep_link=True))
 @router.message(CommandStart())
@@ -160,7 +305,6 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
 
     user = await _upsert_user(message, referrer_id=referrer_id)
     await state.clear()
-    await state.set_state(Onboarding.ROLES)
     tier_blurb = (
         "You're on the <b>free</b> tier (5 outreach emails/day). "
         "Use /upgrade to switch to paid."
@@ -174,10 +318,11 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     )
     await message.answer(
         f"Hi {user.first_name or 'there'}! Let's set up your job hunt.\n\n"
-        f"{tier_blurb}{referral_blurb}\n\n"
-        f"<b>Step 1/6</b> — What roles are you looking for? "
-        f"Comma-separated, e.g.\n<code>python developer, backend engineer, ai engineer</code>"
+        f"{tier_blurb}{referral_blurb}"
     )
+    # Ask only for the first field that's actually missing (existing values
+    # from a previous incomplete onboarding are preserved \u2014 we never re-ask).
+    await _ask_next(message, state)
 
 
 @router.message(Command("cancel"))
@@ -192,22 +337,22 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
 
 @router.message(Command("restart"))
 async def cmd_restart(message: Message, state: FSMContext) -> None:
-    """Explicit opt-in to re-run the full onboarding wizard.
+    """Explicit opt-in to re-run the onboarding wizard.
 
-    Unlike /start, this works even when the user is already ``active`` and
-    has all data filled in. Existing rows stay intact until they finish all
-    7 steps and ``_finish_onboarding`` re-writes them, so an abandoned
-    /restart never deletes anything.
+    Unlike /start, this works even when the user is already ``active``. Existing
+    rows stay intact; ``_ask_next`` will skip any step whose value is already
+    saved in the DB, so the user is only asked for fields that are genuinely
+    missing (e.g. after a row was nulled by an operator). To change a value
+    that's already saved, use /settings instead.
     """
     await _upsert_user(message)  # bumps status back to onboarding
     await state.clear()
-    await state.set_state(Onboarding.ROLES)
     await message.answer(
-        "\U0001f504 Restarting onboarding from scratch. Your current "
-        "settings stay intact until you finish all 7 steps.\n\n"
-        "<b>Step 1/6</b> \u2014 What roles are you looking for? "
-        "Comma-separated, e.g.\n<code>python developer, backend engineer, ai engineer</code>"
+        "\U0001f504 Resuming onboarding. Any answers you already gave are "
+        "kept \u2014 I'll only ask for what's missing. To change something "
+        "that's already saved, use /settings."
     )
+    await _ask_next(message, state)
 
 
 # ---------- step 1: roles ----------
@@ -221,12 +366,8 @@ async def step_roles(message: Message, state: FSMContext) -> None:
         await message.answer("Max 5 roles — send a shorter list.")
         return
     await state.update_data(roles=roles)
-    await state.set_state(Onboarding.LOCATIONS)
-    await message.answer(
-        f"Got it: <b>{', '.join(roles)}</b>\n\n"
-        f"<b>Step 2/6</b> — Which locations? Comma-separated, e.g.\n"
-        f"<code>Bengaluru, Hyderabad, Remote</code>"
-    )
+    await message.answer(f"Got it: <b>{', '.join(roles)}</b>")
+    await _ask_next(message, state)
 
 
 # ---------- step 2: locations ----------
@@ -237,11 +378,7 @@ async def step_locations(message: Message, state: FSMContext) -> None:
         await message.answer("Please send at least one location.")
         return
     await state.update_data(locations=locs)
-    await state.set_state(Onboarding.NAME)
-    await message.answer(
-        f"<b>Step 3/6</b> — What's your full name? "
-        f"This goes in the email signature recruiters see."
-    )
+    await _ask_next(message, state)
 
 
 # ---------- step 3: name ----------
@@ -252,13 +389,8 @@ async def step_name(message: Message, state: FSMContext) -> None:
         await message.answer("Name must be 2-100 characters.")
         return
     await state.update_data(candidate_name=name)
-    await state.set_state(Onboarding.RESUME)
-    await message.answer(
-        f"Thanks, <b>{name}</b>.\n\n"
-        f"<b>Step 4/6</b> — Upload your resume as a PDF (max 10MB).\n"
-        f"\n"
-        f"Tip: on phone, tap the 📎 attachment icon → <b>File</b> → pick your PDF."
-    )
+    await message.answer(f"Thanks, <b>{name}</b>.")
+    await _ask_next(message, state)
 
 
 # ---------- step 4: resume ----------
@@ -282,40 +414,8 @@ async def step_resume(message: Message, state: FSMContext) -> None:
         return
     resume_bytes = buf.read()
     await state.update_data(resume_pdf=resume_bytes, resume_filename=fname)
-    await state.set_state(Onboarding.SMTP_EMAIL)
-    await message.answer(
-        f"Resume saved ({len(resume_bytes) // 1024} KB).\n\n"
-        f"<b>Step 5/6</b> — Gmail address for sending outreach emails\n"
-        f"\n"
-        f"AutoApply sends from your own Gmail (via SMTP), so:\n"
-        f"• Recruiters see <i>your</i> name in their inbox\n"
-        f"• Replies land directly in <i>your</i> Gmail — we never see them\n"
-        f"• You get 500 emails/day quota (Gmail's normal limit)\n"
-        f"\n"
-        f"⚠️ <b>One small thing:</b> please use a Gmail with "
-        f"<b>2-Step Verification enabled</b>.\n"
-        f"\n"
-        f"<b>Why?</b> It's actually for <i>your</i> protection:\n"
-        f"🔒 Keeps your Gmail account safe from break-ins\n"
-        f"🛡️ Stops anyone (including us) from ever using your real password\n"
-        f"✅ Lets you generate an <b>App Password</b> — a separate, "
-        f"revocable key just for AutoApply\n"
-        f"\n"
-        f"<i>Your real Gmail password is never stored, seen, or even asked for. "
-        f"We only use the App Password, and you can revoke it from your Google "
-        f"account at any time.</i>\n"
-        f"\n"
-        f"<b>Haven't turned on 2-Step Verification yet?</b>\n"
-        f"👉 Enable it here (takes ~1 minute):\n"
-        f"    → https://myaccount.google.com/signinoptions/twosv\n"
-        f"\n"
-        f"Once that's done, send your Gmail address below — e.g. "
-        f"<code>you@gmail.com</code>.\n"
-        f"\n"
-        f"<i>Google Workspace email (you@yourcompany.com) also works as long "
-        f"as it's a Google-hosted mailbox with 2-Step Verification on.</i>",
-        disable_web_page_preview=True,
-    )
+    await message.answer(f"Resume saved ({len(resume_bytes) // 1024} KB).")
+    await _ask_next(message, state)
 
 
 @router.message(Onboarding.RESUME)
@@ -349,35 +449,18 @@ async def step_smtp_email(message: Message, state: FSMContext) -> None:
             creds = UserCredentials(user_id=message.from_user.id)
             session.add(creds)
         creds.smtp_email = email
-        creds.candidate_name = data.get("candidate_name")
-        creds.resume_pdf = data["resume_pdf"]
-        creds.resume_filename = data["resume_filename"]
-        creds.resume_uploaded_at = datetime.now(timezone.utc)
+        # Only overwrite these when freshly captured in THIS wizard session
+        # \u2014 a re-entry via /restart that only fills missing fields must not
+        # nuke values that were already saved on a prior run.
+        if data.get("candidate_name"):
+            creds.candidate_name = data["candidate_name"]
+        if data.get("resume_pdf"):
+            creds.resume_pdf = data["resume_pdf"]
+            creds.resume_filename = data["resume_filename"]
+            creds.resume_uploaded_at = datetime.now(timezone.utc)
         await session.commit()
 
-    await state.set_state(Onboarding.SMTP_PASSWORD)
-    await message.answer(
-        f"\u2705 Got it: <b>{email}</b>\n\n"
-        f"<b>Step 6/6</b> \u2014 Gmail <b>app password</b> (16 chars)\n"
-        f"\n"
-        f"This lets AutoApply send mail from your Gmail without your real "
-        f"password. <b>It's not your Gmail login password.</b>\n"
-        f"\n"
-        f"<b>How to get it (2 min, one-time):</b>\n"
-        f"\n"
-        f"1\ufe0f\u20e3  Make sure 2-Step Verification is ON\n"
-        f"    \u2192 https://myaccount.google.com/security\n"
-        f"\n"
-        f"2\ufe0f\u20e3  Generate an app password\n"
-        f"    \u2192 https://myaccount.google.com/apppasswords\n"
-        f"    Name it <code>AutoApply</code>, copy the 16-character code.\n"
-        f"\n"
-        f"3\ufe0f\u20e3  Paste it here (spaces are fine; I'll strip them).\n"
-        f"\n"
-        f"\U0001f512 I'll delete your message and store the password encrypted. "
-        f"You can revoke it anytime from the same Google page.",
-        disable_web_page_preview=True,
-    )
+    await _ask_next(message, state)
 
 
 # ---------- step 6: SMTP app password ----------
@@ -460,8 +543,13 @@ async def _finish_onboarding(message: Message, state: FSMContext) -> None:
         if user is None or prefs is None:
             await message.answer("Internal error: user row missing. /start to restart.")
             return
-        prefs.role_keywords = data.get("roles", [])
-        prefs.locations = data.get("locations", [])
+        # Only overwrite prefs with values freshly captured in THIS wizard
+        # session. /restart that skips already-filled steps must keep the
+        # existing DB values intact.
+        if data.get("roles"):
+            prefs.role_keywords = data["roles"]
+        if data.get("locations"):
+            prefs.locations = data["locations"]
         user.status = UserStatus.active
         tier = user.subscription_tier
         # Snapshot fields for logging before the session closes (ORM
