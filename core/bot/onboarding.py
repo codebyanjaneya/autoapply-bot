@@ -292,8 +292,10 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
             await state.clear()
             await message.answer(
                 f"\U0001f44b Welcome back, <b>{name}</b>!\n\n"
-                f"Your pipeline runs automatically every day at <b>09:00 IST</b>.\n\n"
+                f"Your pipeline runs automatically every day "
+                f"(see /status for your run time).\n\n"
                 f"\u2022 /status \u2014 today's run summary\n"
+                f"\u2022 /settime \u2014 change your daily run time\n"
                 f"\u2022 /settings \u2014 update Gmail, roles, resume, etc.\n"
                 f"\u2022 /pause \u2014 pause daily runs (use /resume to turn back on)\n"
                 f"\u2022 /referral \u2014 invite friends, earn free months\n"
@@ -572,9 +574,11 @@ async def _finish_onboarding(message: Message, state: FSMContext) -> None:
     )
     await message.answer(
         f"\U0001f389 You're all set!\n\n"
-        f"Your pipeline will run automatically every day at <b>09:00 IST</b>.\n\n"
+        f"Your pipeline will run automatically every day at <b>09:00 IST</b> "
+        f"(change with /settime).\n\n"
         f"Commands:\n"
         f"\u2022 /status \u2014 today's run summary\n"
+        f"\u2022 /settime \u2014 change your daily run time (default 9 AM IST)\n"
         f"\u2022 /pause  \u2014 pause daily runs\n"
         f"\u2022 /resume \u2014 resume\n"
         f"\u2022 /referral \u2014 invite friends, earn free months\n"

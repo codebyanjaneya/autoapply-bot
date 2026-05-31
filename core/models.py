@@ -20,8 +20,8 @@ import enum
 from datetime import datetime, date
 
 from sqlalchemy import (
-    BigInteger, Boolean, Date, DateTime, Enum, Float, ForeignKey, Index, Integer,
-    LargeBinary, String, Text, UniqueConstraint, func,
+    BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, Integer,
+    LargeBinary, SmallInteger, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -131,6 +131,21 @@ class UserPreferences(Base):
     skills: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
 
     min_score: Mapped[int] = mapped_column(Integer, default=75, nullable=False)
+
+    # Hour-of-day in Asia/Kolkata (0\u201323) at which this user's daily pipeline
+    # should fire. Scheduler runs every hour and processes only users whose
+    # preferred_run_hour matches the current IST hour. Default 9 = 09:00 IST,
+    # matching the pre-feature global fan-out so existing users see no change.
+    preferred_run_hour: Mapped[int] = mapped_column(
+        SmallInteger, default=9, server_default="9", nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "preferred_run_hour >= 0 AND preferred_run_hour <= 23",
+            name="ck_user_preferences_preferred_run_hour_range",
+        ),
+    )
 
     user: Mapped[User] = relationship(back_populates="preferences")
 

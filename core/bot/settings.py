@@ -35,6 +35,7 @@ from aiogram.types import (
     CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
 )
 
+from core.bot.handlers import _build_settime_keyboard, _format_hour_label
 from core.crypto import encrypt
 from core.db import get_session
 from core.mailer.smtp_sender import SMTPSender
@@ -92,6 +93,9 @@ def _build_keyboard(smtp_missing: bool) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="\U0001f4cd Locations", callback_data="settings:locations"),
+            InlineKeyboardButton(text="\u23f0 Run time", callback_data="settings:settime"),
+        ],
+        [
             InlineKeyboardButton(text="\u2716\ufe0f Done", callback_data="settings:done"),
         ],
     ]
@@ -126,6 +130,10 @@ def _render_overview(user: User, prefs: UserPreferences, creds: UserCredentials)
         lines.append(f"\u2022 Gmail: \u26a0\ufe0f {creds.smtp_email} (app password not set)")
     else:
         lines.append("\u2022 Gmail: \u274c not set \u2014 outreach disabled")
+    lines.append(
+        f"\u2022 Run time: \u23f0 "
+        f"{_format_hour_label(prefs.preferred_run_hour)} IST"
+    )
 
     if not smtp_set:
         lines += [
@@ -198,6 +206,24 @@ async def cb_settings(cb: CallbackQuery, state: FSMContext) -> None:
             except Exception:
                 pass
         await cb.answer("Settings closed.")
+        return
+    if action == "settime":
+        # Re-use the same picker the /settime command builds. The callback
+        # for settime:<hour> lives in core.bot.handlers and persists the
+        # choice — no need to duplicate that logic here.
+        assert cb.from_user is not None
+        async with get_session() as session:
+            prefs = await session.get(UserPreferences, cb.from_user.id)
+        current = prefs.preferred_run_hour if prefs is not None else None
+        current_label = _format_hour_label(current) if current is not None else "9 AM"
+        if isinstance(cb.message, Message):
+            await cb.message.answer(
+                f"\u23f0 <b>Daily run time</b>\n\n"
+                f"Currently: <b>{current_label} IST</b>\n\n"
+                f"Tap a new time below.",
+                reply_markup=_build_settime_keyboard(current),
+            )
+        await cb.answer()
         return
     if action not in _PROMPTS:
         await cb.answer()

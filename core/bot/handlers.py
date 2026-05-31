@@ -50,14 +50,16 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
+)
 from sqlalchemy import select
 
 from core.db import get_session
 from core.models import (
-    Application, DailyRunSummary, Job, OutreachLog, User, UserStatus,
+    Application, DailyRunSummary, Job, OutreachLog, User, UserPreferences, UserStatus,
 )
 
 log = logging.getLogger(__name__)
@@ -82,6 +84,7 @@ async def cmd_help(message: Message) -> None:
         "<b>AutoApply Bot</b>\n\n"
         "\u2022 /start \u2014 begin onboarding (or welcome-back if you're already set up)\n"
         "\u2022 /settings \u2014 update Gmail, roles, resume, etc. without redoing /start\n"
+        "\u2022 /settime \u2014 change your daily run time (default 9 AM IST)\n"
         "\u2022 /status \u2014 today's pipeline summary + recent outreach\n"
         "\u2022 /pause \u2014 stop daily pipeline runs\n"
         "\u2022 /resume \u2014 resume daily runs\n"
@@ -102,6 +105,7 @@ async def cmd_status(message: Message) -> None:
     today = datetime.now(timezone.utc).date()
     async with get_session() as session:
         summary = await session.get(DailyRunSummary, (user.id, today))
+        prefs = await session.get(UserPreferences, user.id)
 
         # Top 3 outreach attempts today.
         log_stmt = (
@@ -119,10 +123,15 @@ async def cmd_status(message: Message) -> None:
         UserStatus.paused: "\u23f8\ufe0f paused",
     }.get(user.status, str(user.status.value))
 
+    run_hour = prefs.preferred_run_hour if prefs is not None else 9
+    run_time_label = _format_hour_label(run_hour)
+
     lines = [
         f"<b>Status: {status_emoji}</b>",
         f"Tier: <b>{user.subscription_tier.value}</b>  "
         f"(limits: {user.daily_scan_limit} scans, {user.daily_outreach_limit} outreach/day)",
+        f"Daily run time: <b>{run_time_label} IST</b>  "
+        f"<i>(change with /settime)</i>",
         "",
         f"<b>Today ({today.isoformat()})</b>",
     ]
@@ -183,7 +192,104 @@ async def cmd_resume(message: Message) -> None:
         if u is not None:
             u.status = UserStatus.active
             await session.commit()
-    await message.answer("\u25b6\ufe0f Resumed. Next run at 09:00 IST.")
+        prefs = await session.get(UserPreferences, user.id)
+    run_label = _format_hour_label(prefs.preferred_run_hour) if prefs else "9 AM"
+    await message.answer(
+        f"\u25b6\ufe0f Resumed. Next run at <b>{run_label} IST</b>."
+    )
+
+
+# ---------- /settime: change preferred daily run hour (IST) ----------
+# Options surfaced as buttons. Keep this short — long lists are noisy in
+# Telegram chat. 7am–11am covers morning people; 6pm–10pm covers night
+# owls. Anything outside this range can still be set by the operator via
+# direct SQL if a user really wants 3am.
+_SETTIME_HOURS = [7, 8, 9, 10, 11, 18, 19, 20, 21, 22]
+
+
+def _format_hour_label(hour: int) -> str:
+    """7 -> '7 AM', 18 -> '6 PM'."""
+    suffix = "AM" if hour < 12 else "PM"
+    h12 = hour if 1 <= hour <= 12 else (hour - 12 if hour > 12 else 12)
+    return f"{h12} {suffix}"
+
+
+def _build_settime_keyboard(current: int | None = None) -> InlineKeyboardMarkup:
+    """Two rows: morning (5 buttons) and evening (5 buttons).
+
+    The user's current choice is marked with a check so they can see it
+    at a glance.
+    """
+    morning, evening = _SETTIME_HOURS[:5], _SETTIME_HOURS[5:]
+
+    def _btn(h: int) -> InlineKeyboardButton:
+        label = _format_hour_label(h)
+        if current == h:
+            label = f"\u2705 {label}"
+        return InlineKeyboardButton(text=label, callback_data=f"settime:{h}")
+
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(h) for h in morning],
+        [_btn(h) for h in evening],
+    ])
+
+
+@router.message(Command("settime"))
+async def cmd_settime(message: Message) -> None:
+    user = await _require_user(message)
+    if user is None:
+        return
+    async with get_session() as session:
+        prefs = await session.get(UserPreferences, user.id)
+    current = prefs.preferred_run_hour if prefs is not None else None
+    current_label = _format_hour_label(current) if current is not None else "9 AM"
+    await message.answer(
+        f"\u23f0 <b>Daily run time</b>\n\n"
+        f"Currently: <b>{current_label} IST</b>\n\n"
+        f"Tap a new time below \u2014 your pipeline will run at that hour "
+        f"every day starting tomorrow.",
+        reply_markup=_build_settime_keyboard(current),
+    )
+
+
+@router.callback_query(F.data.startswith("settime:"))
+async def on_settime_pick(cb: CallbackQuery) -> None:
+    assert cb.from_user is not None
+    assert cb.data is not None
+    try:
+        hour = int(cb.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await cb.answer("Invalid choice.", show_alert=True)
+        return
+    if not (0 <= hour <= 23):
+        await cb.answer("Hour out of range.", show_alert=True)
+        return
+
+    async with get_session() as session:
+        prefs = await session.get(UserPreferences, cb.from_user.id)
+        if prefs is None:
+            await cb.answer("Finish /start first.", show_alert=True)
+            return
+        prefs.preferred_run_hour = hour
+        await session.commit()
+
+    label = _format_hour_label(hour)
+    log.info("user %s set preferred_run_hour=%d", cb.from_user.id, hour)
+    # Edit the original message so the button list disappears \u2014 cleaner UX
+    # than leaving a stale keyboard behind.
+    if cb.message is not None:
+        try:
+            await cb.message.edit_text(
+                f"\u2705 Done! Your pipeline will now run daily at "
+                f"<b>{label} IST</b>."
+            )
+        except Exception:
+            # Edit can fail (e.g. message too old). Fall back to a new message.
+            await cb.message.answer(
+                f"\u2705 Done! Your pipeline will now run daily at "
+                f"<b>{label} IST</b>."
+            )
+    await cb.answer()
 
 
 @router.message(Command("upgrade"))
