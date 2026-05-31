@@ -23,7 +23,7 @@ from sqlalchemy import (
     BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum, Float, ForeignKey, Index, Integer,
     LargeBinary, SmallInteger, String, Text, UniqueConstraint, func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -181,19 +181,36 @@ class UserCredentials(Base):
 
 
 class Subscription(Base):
-    """Stripe billing state. Source of truth for `User.plan` upgrades."""
+    """Billing state \u2014 Razorpay Payment Links (MVP). Source of truth for plan.
+
+    Stripe columns retained nullable for forward-compat / future re-introduction
+    if we add a true recurring-billing rail. Today every paid upgrade flows
+    through `razorpay_payment_link_id` -> webhook -> `current_period_*`.
+    """
     __tablename__ = "subscriptions"
 
     user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True,
     )
-    stripe_customer_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Legacy Stripe fields \u2014 nullable now; unused by Razorpay path.
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), unique=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), unique=True)
+
+    # --- Razorpay (current rail) ---
+    # Latest issued payment link for this user. We always mint a fresh link on
+    # /upgrade (simpler than reusing); this column records the most recent one
+    # so we can map `payment_link.paid` webhooks back to the user as a fallback
+    # if the `notes.user_id` payload is missing.
+    razorpay_payment_link_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    razorpay_payment_id: Mapped[str | None] = mapped_column(String(64))
+    razorpay_order_id: Mapped[str | None] = mapped_column(String(64))
+
     status: Mapped[SubscriptionStatus] = mapped_column(
         Enum(SubscriptionStatus, name="subscription_status"),
         default=SubscriptionStatus.incomplete, nullable=False, index=True,
     )
-    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     plan_price_id: Mapped[str | None] = mapped_column(String(64))
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -370,3 +387,32 @@ class StripeEvent(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Raw payload for debugging; drop after 30 days via GC.
     payload: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------- razorpay webhook replay protection ----------
+class PaymentEvent(Base):
+    """Idempotency guard for Razorpay webhooks.
+
+    Same pattern as `StripeEvent`: UNIQUE constraint on `razorpay_event_id` is
+    the lock point \u2014 a duplicate insert raises IntegrityError, the handler
+    swallows it and returns 200 OK so Razorpay stops retrying. `payload_json`
+    is kept for debugging / replay; GC after 30 days.
+
+    `user_id` is set when the handler resolves the event back to a user (via
+    `notes.user_id` on the payment link). Kept nullable + ON DELETE SET NULL
+    so we don't lose audit history if a user is deleted.
+    """
+    __tablename__ = "payment_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    razorpay_event_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), index=True,
+    )
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_error: Mapped[str | None] = mapped_column(Text)

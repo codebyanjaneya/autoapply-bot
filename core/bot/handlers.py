@@ -89,6 +89,7 @@ async def cmd_help(message: Message) -> None:
         "\u2022 /pause \u2014 stop daily pipeline runs\n"
         "\u2022 /resume \u2014 resume daily runs\n"
         "\u2022 /upgrade \u2014 unlock Pro (\u20b9500/mo)\n"
+        "\u2022 /subscription \u2014 see your current plan + days remaining\n"
         "\u2022 /features \u2014 everything Pro includes\n"
         "\u2022 /referral \u2014 your invite link (earn 1 month free per upgrade)\n"
         "\u2022 /restart \u2014 redo onboarding from scratch (existing data kept until you finish)\n"
@@ -294,12 +295,49 @@ async def on_settime_pick(cb: CallbackQuery) -> None:
 
 @router.message(Command("upgrade"))
 async def cmd_upgrade(message: Message) -> None:
-    # TODO(week-6): add "Bring your own contacts (/add_contacts) — zero lookup
+    # TODO(week-6): add "Bring your own contacts (/add_contacts) \u2014 zero lookup
     # cost, 100% hit rate" as a value bullet in the Pro pitch.
-    # Stripe checkout URL will be wired in Week 5. Until then the link
-    # below is a placeholder — clicking it tells the user to wait.
-    # TODO(week-5): replace with real Stripe payment-link URL.
-    stripe_link = "https://buy.stripe.com/test_placeholder_autoapply_pro"
+    from core.payments import create_payment_link_for_user  # local import to avoid cycle
+
+    user = await _require_user(message)
+    if user is None:
+        return
+
+    # Already paid? Tell them how long they have + offer renewal.
+    if user.subscription_tier.value == "paid":
+        from core.models import Subscription
+        async with get_session() as session:
+            sub = await session.get(Subscription, user.id)
+        if sub is not None and sub.current_period_end is not None:
+            days_left = max(
+                0,
+                (sub.current_period_end - datetime.now(timezone.utc)).days,
+            )
+            await message.answer(
+                f"\u2728 You're already on <b>AutoApply Pro</b>. "
+                f"Your plan is active for <b>{days_left}</b> more day(s) "
+                f"(through {sub.current_period_end.strftime('%d %b %Y')}).\n\n"
+                f"Want to extend? Reply /upgrade again within 3 days of "
+                f"expiry and we'll stack the new month on top."
+            )
+            return
+
+    # Mint fresh Razorpay payment link.
+    try:
+        async with get_session() as session:
+            # Re-load inside this session so the row is attached.
+            u = await session.get(User, user.id)
+            assert u is not None
+            short_url, link_id = await create_payment_link_for_user(session, u)
+    except Exception:
+        log.exception("razorpay payment link creation failed user_id=%s", user.id)
+        await message.answer(
+            "\u26a0\ufe0f Could not create your payment link right now. "
+            "Try /upgrade again in a minute, or DM the operator if it keeps failing."
+        )
+        return
+
+    log.info("/upgrade: minted link_id=%s for user_id=%s", link_id, user.id)
     await message.answer(
         "<b>\U0001f4b0 The math</b>\n"
         "<pre>"
@@ -329,13 +367,48 @@ async def cmd_upgrade(message: Message) -> None:
         "Priority queue     no      yes\n"
         "</pre>"
         "\n"
-        f"<b>\u2192 Upgrade:</b> {stripe_link}\n"
-        "<i>(Stripe checkout launches in the next release. DM the operator "
-        "for early access \u2014 we'll flip your account manually.)</i>\n"
+        f"<b>\u2192 Pay now (Razorpay, \u20b9500):</b>\n{short_url}\n\n"
+        "<i>Link valid for 7 days. Pay with UPI / card / netbanking \u2014 your "
+        "account upgrades automatically within seconds of payment.</i>\n"
         "\n"
         "Cancel anytime. No lock-in. Try /features for the full list.",
         disable_web_page_preview=True,
     )
+
+
+@router.message(Command("subscription"))
+async def cmd_subscription(message: Message) -> None:
+    """Show the user's current plan + expiry."""
+    from core.models import Subscription
+
+    user = await _require_user(message)
+    if user is None:
+        return
+    async with get_session() as session:
+        sub = await session.get(Subscription, user.id)
+
+    tier_label = "\u2728 Pro" if user.subscription_tier.value == "paid" else "Free"
+    lines = [
+        f"<b>Plan:</b> {tier_label}",
+        f"<b>Daily limits:</b> {user.daily_scan_limit} scans, "
+        f"{user.daily_outreach_limit} outreach emails",
+    ]
+    if user.subscription_tier.value == "paid" and sub is not None and sub.current_period_end is not None:
+        days_left = max(
+            0,
+            (sub.current_period_end - datetime.now(timezone.utc)).days,
+        )
+        lines.append(
+            f"<b>Active until:</b> {sub.current_period_end.strftime('%d %b %Y')} "
+            f"({days_left} day(s) remaining)"
+        )
+        lines.append("")
+        lines.append("Tap /upgrade within 3 days of expiry to renew.")
+    else:
+        lines.append("")
+        lines.append("Tap /upgrade to unlock Pro (\u20b9500/month).")
+
+    await message.answer("\n".join(lines))
 
 
 @router.message(Command("features"))

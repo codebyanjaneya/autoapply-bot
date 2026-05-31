@@ -51,8 +51,10 @@ from aiogram import Bot, Dispatcher  # noqa: E402
 from aiogram.client.default import DefaultBotProperties  # noqa: E402
 from aiogram.enums import ParseMode  # noqa: E402
 from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
+from aiohttp import web  # noqa: E402
 
 from core.bot import commands_router, onboarding_router, settings_router  # noqa: E402
+from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
 
 
@@ -61,7 +63,7 @@ async def amain() -> None:
         token=os.environ["TELEGRAM_BOT_TOKEN"],
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    # MemoryStorage is fine for one process — onboarding state lives in RAM.
+    # MemoryStorage is fine for one process \u2014 onboarding state lives in RAM.
     # When we scale horizontally, swap to RedisStorage so multiple bot
     # workers share FSM state.
     dp = Dispatcher(storage=MemoryStorage())
@@ -71,7 +73,26 @@ async def amain() -> None:
 
     scheduler = build_scheduler(bot=bot)
     scheduler.start()
-    log.info("scheduler started \u2014 daily fan-out at 09:00 Asia/Kolkata")
+    log.info(
+        "scheduler started \u2014 hourly fan-out at minute 0, billing crons at "
+        "00:05 + 09:30 Asia/Kolkata"
+    )
+
+    # --- Razorpay webhook server (aiohttp) ---
+    # Runs alongside Dispatcher.start_polling in the same event loop.
+    # Bind 0.0.0.0 so the deploy host (Railway/Fly/etc.) can reach it; the
+    # public URL is whatever the hosting platform exposes. Locally use a
+    # tunnel (cloudflared / ngrok) and point Razorpay dashboard at it.
+    webhook_port = int(os.environ.get("RAZORPAY_WEBHOOK_PORT", "8000"))
+    webhook_app = build_webhook_app(bot=bot)
+    runner = web.AppRunner(webhook_app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=webhook_port)
+    await site.start()
+    log.info(
+        "webhook server listening on 0.0.0.0:%d  (POST /webhooks/razorpay)",
+        webhook_port,
+    )
 
     me = await bot.get_me()
     log.info("bot online as @%s (id=%s)", me.username, me.id)
@@ -83,6 +104,7 @@ async def amain() -> None:
         await dp.start_polling(bot, drop_pending_updates=True)
     finally:
         scheduler.shutdown(wait=False)
+        await runner.cleanup()
         await bot.session.close()
         log.info("shutdown complete")
 

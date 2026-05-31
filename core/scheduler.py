@@ -205,6 +205,10 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
 
 def build_scheduler(bot: Bot) -> AsyncIOScheduler:
     """Create and configure the scheduler. Caller is responsible for .start()."""
+    # Local import to avoid a cycle: core.payments -> core.db -> (...) and we
+    # only need the cron job entry points here.
+    from core.payments import expire_due_subscriptions, send_expiry_reminders
+
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(
         run_hourly_fanout,
@@ -216,5 +220,30 @@ def build_scheduler(bot: Bot) -> AsyncIOScheduler:
         misfire_grace_time=3600,
         max_instances=1,         # never run two fan-outs concurrently
         coalesce=True,           # collapse missed runs into a single execution
+    )
+
+    # --- billing: expire paid users whose period_end has passed ---
+    # 00:05 IST so it runs once after midnight, before the morning fan-out.
+    scheduler.add_job(
+        expire_due_subscriptions,
+        trigger=CronTrigger(hour=0, minute=5, timezone=TIMEZONE),
+        kwargs={"bot": bot},
+        id="expire_subscriptions_daily",
+        misfire_grace_time=3600,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # --- billing: friendly nudge ~3 days before expiry ---
+    # 09:30 IST: morning timezone, doesn't collide with the on-the-hour
+    # pipeline fan-out (which runs at minute=0).
+    scheduler.add_job(
+        send_expiry_reminders,
+        trigger=CronTrigger(hour=9, minute=30, timezone=TIMEZONE),
+        kwargs={"bot": bot},
+        id="expiry_reminder_daily",
+        misfire_grace_time=3600,
+        max_instances=1,
+        coalesce=True,
     )
     return scheduler

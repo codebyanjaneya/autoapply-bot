@@ -16,7 +16,8 @@ apscheduler>=3.10.0
 cryptography>=42.0.0      # Fernet for SMTP password encryption
 
 # --- Payments ---
-stripe>=8.0.0
+stripe>=8.0.0             # legacy (not wired \u2014 kept for future migration)
+razorpay>=1.4.2           # Razorpay Python SDK (Payment Links + webhook signature verify)
 
 # --- Job data source ---
 httpx>=0.27.0             # async HTTP for Adzuna / JSearch / Hunter / Apollo
