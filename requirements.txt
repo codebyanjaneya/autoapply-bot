@@ -1,0 +1,33 @@
+# --- Web framework + Telegram bot ---
+aiogram>=3.4.0
+fastapi>=0.110.0          # OAuth callback + Stripe webhook + health endpoints
+uvicorn[standard]>=0.27.0
+
+# --- Database ---
+sqlalchemy[asyncio]>=2.0.27
+asyncpg>=0.29.0           # async Postgres driver (production)
+psycopg2-binary>=2.9.9    # sync driver, needed by Alembic
+alembic>=1.13.0
+
+# --- Scheduling ---
+apscheduler>=3.10.0
+
+# --- Security ---
+cryptography>=42.0.0      # Fernet for SMTP password encryption
+
+# --- Payments ---
+stripe>=8.0.0
+
+# --- Job data source ---
+httpx>=0.27.0             # async HTTP for Adzuna / JSearch / Hunter / Apollo
+
+# --- LLM scoring ---
+groq>=0.4.0
+tenacity>=8.2.0
+
+# --- Email send ---
+aiosmtplib>=3.0.0         # async SMTP client; works against Gmail TLS:587
+
+# --- Config + observability ---
+python-dotenv>=1.0.0
+structlog>=24.1.0

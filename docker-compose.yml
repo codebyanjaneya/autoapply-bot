@@ -1,0 +1,27 @@
+version: "3.9"
+
+# Local Postgres for development. Production uses Railway/Render managed Postgres.
+# Start with:   docker compose up -d
+# Stop with:    docker compose down
+# Wipe data:    docker compose down -v
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: autoapply_postgres
+    environment:
+      POSTGRES_USER: autoapply
+      POSTGRES_PASSWORD: autoapply
+      POSTGRES_DB: autoapply
+    ports:
+      - "5432:5432"
+    volumes:
+      - autoapply_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autoapply"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  autoapply_pgdata:

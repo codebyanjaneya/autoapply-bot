@@ -1,0 +1,98 @@
+"""Service entry point: aiogram bot polling + APScheduler daily job.
+
+Run locally:
+    python main.py
+
+Required env (.env loaded automatically):
+    TELEGRAM_BOT_TOKEN   from @BotFather
+    DATABASE_URL         Postgres URL (Neon, etc.)
+    ENCRYPTION_KEY       Fernet key (see core/crypto.py for generation)
+    GROQ_API_KEY         scoring
+    ADZUNA_APP_ID / ADZUNA_APP_KEY   job source
+    HUNTER_API_KEY       optional; pooled key for paid-tier users
+
+The bot uses long-polling (no webhook server, no public URL needed for
+MVP). Switch to webhooks before scaling past ~100 active users; aiogram's
+polling has a cap around 30 updates/s which we won't hit before that.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import sys
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Configure logging BEFORE any other imports so module-level loggers pick
+# up the formatter. Keep third-party libs at WARNING to reduce noise.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+for noisy in ("httpx", "httpcore", "asyncio", "sqlalchemy.engine",
+              "aiosmtplib", "apscheduler.scheduler", "apscheduler.executors.default"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
+
+log = logging.getLogger("main")
+
+# Fail fast on missing env \u2014 cheaper than failing inside a handler later.
+_REQUIRED = ["TELEGRAM_BOT_TOKEN", "DATABASE_URL", "ENCRYPTION_KEY",
+             "GROQ_API_KEY", "ADZUNA_APP_ID", "ADZUNA_APP_KEY"]
+_missing = [k for k in _REQUIRED if not os.environ.get(k)]
+if _missing:
+    print(f"FATAL: missing env vars: {', '.join(_missing)}", file=sys.stderr)
+    sys.exit(1)
+
+from aiogram import Bot, Dispatcher  # noqa: E402
+from aiogram.client.default import DefaultBotProperties  # noqa: E402
+from aiogram.enums import ParseMode  # noqa: E402
+from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
+
+from core.bot import commands_router, onboarding_router, settings_router  # noqa: E402
+from core.scheduler import build_scheduler  # noqa: E402
+
+
+async def amain() -> None:
+    bot = Bot(
+        token=os.environ["TELEGRAM_BOT_TOKEN"],
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    # MemoryStorage is fine for one process — onboarding state lives in RAM.
+    # When we scale horizontally, swap to RedisStorage so multiple bot
+    # workers share FSM state.
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(onboarding_router)
+    dp.include_router(settings_router)
+    dp.include_router(commands_router)
+
+    scheduler = build_scheduler(bot=bot)
+    scheduler.start()
+    log.info("scheduler started \u2014 daily fan-out at 09:00 Asia/Kolkata")
+
+    me = await bot.get_me()
+    log.info("bot online as @%s (id=%s)", me.username, me.id)
+
+    try:
+        # drop_pending_updates: ignore the backlog from while the bot was offline.
+        # For an MVP this is the right call; later we may want to process the
+        # backlog so /status messages aren't dropped.
+        await dp.start_polling(bot, drop_pending_updates=True)
+    finally:
+        scheduler.shutdown(wait=False)
+        await bot.session.close()
+        log.info("shutdown complete")
+
+
+def main() -> None:
+    try:
+        asyncio.run(amain())
+    except (KeyboardInterrupt, SystemExit):
+        log.info("interrupted; exiting")
+
+
+if __name__ == "__main__":
+    main()
