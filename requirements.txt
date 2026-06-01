@@ -1,6 +1,6 @@
 # --- Web framework + Telegram bot ---
 aiogram>=3.4.0
-fastapi>=0.110.0          # OAuth callback + Stripe webhook + health endpoints
+fastapi>=0.110.0          # OAuth callback + future HTTP endpoints (Razorpay webhook uses aiohttp via aiogram)
 uvicorn[standard]>=0.27.0
 
 # --- Database ---
@@ -16,7 +16,7 @@ apscheduler>=3.10.0
 cryptography>=42.0.0      # Fernet for SMTP password encryption
 
 # --- Payments ---
-stripe>=8.0.0             # legacy (not wired \u2014 kept for future migration)
+
 razorpay>=1.4.2           # Razorpay Python SDK (Payment Links + webhook signature verify)
 
 # --- Job data source ---

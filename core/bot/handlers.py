@@ -1,6 +1,6 @@
 """Post-onboarding bot commands: /status, /pause, /resume, /upgrade, /help."""
 # =============================================================================
-# TODO(week-6): Custom contact list feature \u2014 implement after Stripe lands.
+# TODO(week-6): Custom contact list feature \u2014 implement after Razorpay lands.
 #
 # User story: power users already have recruiter emails (from their own
 # research, alumni network, LinkedIn). Let them paste those in and bypass
@@ -479,7 +479,7 @@ async def cmd_referral(message: Message) -> None:
         f"\u2022 People signed up via your link: <b>{referred_count}</b>\n"
         f"\u2022 Of those, upgraded to Pro: <b>{paid_count}</b>\n"
         f"\u2022 Free months earned: <b>{paid_count}</b> "
-        f"<i>(applied automatically once Stripe checkout ships)</i>",
+        f"<i>(applied automatically once paid-tier upgrades land via Razorpay)</i>",
         disable_web_page_preview=True,
     )
 

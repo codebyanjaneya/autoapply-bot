@@ -5,7 +5,7 @@ Design choices:
   never need a unique column or collision-handling. Decoding is reversible.
 - We DO store ``users.referred_by_user_id`` on the referee (nullable, set
   once at onboarding). Reverse-lookup gives "who did I refer?".
-- "1 month free" fulfilment is deferred to the Stripe webhook (Week 5).
+- "1 month free" fulfilment is deferred to the Razorpay webhook (Week 5).
   Until then ``count_referrals`` just exposes the counter so /referral can
   display "you've earned N months (applied when checkout launches)".
 """

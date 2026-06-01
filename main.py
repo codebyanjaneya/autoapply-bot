@@ -83,7 +83,18 @@ async def amain() -> None:
     # Bind 0.0.0.0 so the deploy host (Railway/Fly/etc.) can reach it; the
     # public URL is whatever the hosting platform exposes. Locally use a
     # tunnel (cloudflared / ngrok) and point Razorpay dashboard at it.
-    webhook_port = int(os.environ.get("RAZORPAY_WEBHOOK_PORT", "8000"))
+    #
+    # Port resolution order:
+    #   1. RAZORPAY_WEBHOOK_PORT  — explicit override
+    #   2. PORT                   — Railway / Heroku / Fly inject this
+    #   3. 8000                   — local dev default
+    # Railway crashes the deploy if the service never binds to $PORT, so
+    # the fallback to PORT is the difference between green and red there.
+    webhook_port = int(
+        os.environ.get("RAZORPAY_WEBHOOK_PORT")
+        or os.environ.get("PORT")
+        or "8000"
+    )
     webhook_app = build_webhook_app(bot=bot)
     runner = web.AppRunner(webhook_app)
     await runner.setup()
