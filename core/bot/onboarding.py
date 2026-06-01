@@ -320,7 +320,9 @@ async def cmd_start(message: Message, state: FSMContext, command: CommandObject)
     )
     await message.answer(
         f"Hi {user.first_name or 'there'}! Let's set up your job hunt.\n\n"
-        f"{tier_blurb}{referral_blurb}"
+        f"{tier_blurb}{referral_blurb}\n\n"
+        f"<i>New here? Send /howitworks for a 7-step walkthrough of what "
+        f"the bot does \u2014 you can do this any time, even mid-setup.</i>"
     )
     # Ask only for the first field that's actually missing (existing values
     # from a previous incomplete onboarding are preserved \u2014 we never re-ask).

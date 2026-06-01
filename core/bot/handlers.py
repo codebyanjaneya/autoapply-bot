@@ -83,6 +83,7 @@ async def cmd_help(message: Message) -> None:
     await message.answer(
         "<b>AutoApply Bot</b>\n\n"
         "\u2022 /start \u2014 begin onboarding (or welcome-back if you're already set up)\n"
+        "\u2022 /howitworks \u2014 7-step walkthrough of what the bot does\n"
         "\u2022 /settings \u2014 update Gmail, roles, resume, etc. without redoing /start\n"
         "\u2022 /settime \u2014 change your daily run time (default 9 AM IST)\n"
         "\u2022 /status \u2014 today's pipeline summary + recent outreach\n"
@@ -95,6 +96,58 @@ async def cmd_help(message: Message) -> None:
         "\u2022 /restart \u2014 redo onboarding from scratch (existing data kept until you finish)\n"
         "\u2022 /cancel \u2014 abort the current wizard step\n"
         "\u2022 /help \u2014 this message"
+    )
+
+
+@router.message(Command("howitworks"))
+async def cmd_howitworks(message: Message) -> None:
+    """Friendly 7-step walkthrough for new (and curious) users.
+
+    Intentionally does NOT call ``_require_user`` \u2014 someone evaluating
+    the bot pre-onboarding should be able to read this without /start first.
+    """
+    await message.answer(
+        "\U0001f916 <b>How AutoApply Works</b>\n"
+        "\n"
+        "<b>Step 1 \u2014 Tell us what you're looking for</b>\n"
+        "You enter your target roles, locations, and upload your resume. "
+        "Takes 2 minutes.\n"
+        "\n"
+        "<b>Step 2 \u2014 We find the jobs</b>\n"
+        "Every day at your chosen time, we automatically scan hundreds of "
+        "fresh job listings from top job boards \u2014 filtered to match your "
+        "roles and locations.\n"
+        "\n"
+        "<b>Step 3 \u2014 AI scores every job</b>\n"
+        "Our AI reads each job description and scores it against your resume "
+        "(0\u2013100). Only the best matches move forward \u2014 no more applying "
+        "to irrelevant jobs.\n"
+        "\n"
+        "<b>Step 4 \u2014 We find the recruiter</b>\n"
+        "For each matched job, we automatically find the hiring manager or "
+        "recruiter's email using our recruiter database.\n"
+        "\n"
+        "<b>Step 5 \u2014 Personalised emails sent automatically</b>\n"
+        "We send a personalised outreach email with your resume attached \u2014 "
+        "directly to the recruiter's inbox. Not a generic application, "
+        "a real human-like email.\n"
+        "\n"
+        "<b>Step 6 \u2014 You get notified</b>\n"
+        "You receive a daily Telegram summary showing how many jobs were "
+        "found, scored, and how many emails were sent.\n"
+        "\n"
+        "<b>Step 7 \u2014 Replies come to your inbox</b>\n"
+        "Recruiters reply directly to your Gmail. You handle the conversation "
+        "from there.\n"
+        "\n"
+        "<b>Plans</b>\n"
+        "\u2022 <b>Free</b>: 5 emails/day, 20 job scans\n"
+        "\u2022 <b>Pro (\u20b9500/month)</b>: 15 emails/day, 50 scans\n"
+        "\n"
+        "Ready to start? Send /start\n"
+        "See pricing: /upgrade\n"
+        "See all commands: /help",
+        disable_web_page_preview=True,
     )
 
 
