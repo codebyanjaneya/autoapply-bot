@@ -167,6 +167,37 @@ async def amain() -> None:
         # still works, the Menu button just won't show the latest list.
         log.exception("set_my_commands failed (non-fatal)")
 
+    # Defensive: if a webhook was ever set on this token (manually via
+    # BotFather or a prior experiment), getUpdates will conflict with it
+    # and raise TelegramConflictError. Clearing it is a no-op when no
+    # webhook is set, so it's safe to call on every startup.
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        log.info("delete_webhook OK (defensive \u2014 ensures polling can claim getUpdates)")
+    except Exception:
+        log.exception("delete_webhook failed (non-fatal)")
+
+    # Raw-socket probe to Gmail SMTP. If the deploy host's egress firewall
+    # blocks :587 or :465 we want to see that BEFORE the first user's
+    # onboarding hits SMTPConnectTimeoutError, so we can route to Resend.
+    import socket as _socket
+    for _port in (587, 465):
+        try:
+            _s = _socket.create_connection(("smtp.gmail.com", _port), timeout=5)
+            _s.close()
+            log.info("egress probe: smtp.gmail.com:%d OK", _port)
+        except Exception as e:
+            log.error(
+                "egress probe: smtp.gmail.com:%d FAILED (%s: %s) \u2014 outbound "
+                "blocked by host firewall; switch to Resend (RESEND_API_KEY).",
+                _port, type(e).__name__, e,
+            )
+
+    # Audit who's about to claim getUpdates \u2014 helps diagnose
+    # TelegramConflictError. If two containers print this line within a
+    # few seconds of each other in Railway's log, you have a duplicate.
+    log.info("about to start polling (PID=%d, instance=%s)", os.getpid(), me.username)
+
     try:
         # drop_pending_updates: ignore the backlog from while the bot was offline.
         # For an MVP this is the right call; later we may want to process the
