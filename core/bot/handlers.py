@@ -215,6 +215,7 @@ async def cmd_run(message: Message) -> None:
     )
 
 
+@router.message(Command("status"))
 async def cmd_status(message: Message) -> None:
     user = await _require_user(message)
     if user is None:

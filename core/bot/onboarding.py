@@ -1,14 +1,13 @@
-﻿"""Onboarding wizard for new users.
+"""Onboarding wizard for new users.
 
 Flow (driven by an FSM in MemoryStorage):
 
     /start
-      â†’ ROLES           "What roles? (comma-separated)"
-      â†’ LOCATIONS       "Which cities? (comma-separated; 'Remote' allowed)"
-      â†’ NAME            "Your full name (used in email signature)"
-      â†’ RESUME          (upload PDF)
-      â†’ SMTP_EMAIL      "Your Gmail address (we send via SMTP)"
-      â†’ SMTP_PASSWORD   "Gmail app password (16 chars)"  (message auto-deleted)
+      â†’ ROLES           roles list
+      â†’ LOCATIONS       cities (Remote allowed)
+      â†’ NAME            full name for email signature
+      â†’ RESUME          PDF upload
+      â†’ SMTP_EMAIL      personal email (used as Reply-To only)
       â†’ done            User.status = active; ready for tomorrow's run.
 
 Apollo note: a previous revision had a Step 7 asking the user for their own
@@ -46,10 +45,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message
 
-from core.crypto import encrypt
 from core.db import get_session
-from core.mailer import is_managed_sending
-from core.mailer.smtp_sender import SMTPSender
 from core.models import (
     SubscriptionTier, User, UserCredentials, UserPreferences, UserStatus,
 )
@@ -67,7 +63,6 @@ class Onboarding(StatesGroup):
     NAME = State()
     RESUME = State()
     SMTP_EMAIL = State()
-    SMTP_PASSWORD = State()
 
 
 # ---------- helpers ----------
@@ -133,23 +128,23 @@ async def _silent_delete(message: Message) -> None:
 async def _prompt_roles(message: Message, state: FSMContext) -> None:
     await state.set_state(Onboarding.ROLES)
     await message.answer(
-        "<b>Step 1/6</b> \u2014 What roles are you looking for? "
-        "Comma-separated, e.g.\n<code>python developer, backend engineer, ai engineer</code>"
+        "<b>Step 1/5</b> \u2014 What roles are you looking for?\n"
+        "e.g. <code>python developer, backend engineer, ai engineer</code>"
     )
 
 
 async def _prompt_locations(message: Message, state: FSMContext) -> None:
     await state.set_state(Onboarding.LOCATIONS)
     await message.answer(
-        "<b>Step 2/6</b> \u2014 Which locations? Comma-separated, e.g.\n"
-        "<code>Bengaluru, Hyderabad, Remote</code>"
+        "<b>Step 2/5</b> \u2014 Which locations?\n"
+        "e.g. <code>Bengaluru, Hyderabad, Remote</code>"
     )
 
 
 async def _prompt_name(message: Message, state: FSMContext) -> None:
     await state.set_state(Onboarding.NAME)
     await message.answer(
-        "<b>Step 3/6</b> \u2014 What's your full name? "
+        "<b>Step 3/5</b> \u2014 What's your full name? "
         "This goes in the email signature recruiters see."
     )
 
@@ -157,7 +152,7 @@ async def _prompt_name(message: Message, state: FSMContext) -> None:
 async def _prompt_resume(message: Message, state: FSMContext) -> None:
     await state.set_state(Onboarding.RESUME)
     await message.answer(
-        "<b>Step 4/6</b> \u2014 Upload your resume as a PDF (max 10MB).\n"
+        "<b>Step 4/5</b> \u2014 Upload your resume as a PDF (max 10MB).\n"
         "\n"
         "Tip: on phone, tap the \U0001f4ce attachment icon \u2192 <b>File</b> \u2192 pick your PDF."
     )
@@ -165,78 +160,15 @@ async def _prompt_resume(message: Message, state: FSMContext) -> None:
 
 async def _prompt_smtp_email(message: Message, state: FSMContext) -> None:
     await state.set_state(Onboarding.SMTP_EMAIL)
-    if is_managed_sending():
-        # Managed mode: we send from our own verified domain. The user's
-        # email is only used as the Reply-To header so recruiter replies
-        # land in their inbox. No Gmail / app-password setup needed.
-        await message.answer(
-            "<b>Step 5/5</b> \u2014 Your email address (for recruiter replies)\n"
-            "\n"
-            "AutoApply sends outreach on your behalf from our verified domain. "
-            "When a recruiter hits <b>Reply</b>, the message goes <i>straight "
-            "to this inbox</i> \u2014 we never see it.\n"
-            "\n"
-            "Send your email address below \u2014 e.g. <code>you@gmail.com</code>. "
-            "Any provider works (Gmail, Outlook, custom domain).",
-            disable_web_page_preview=True,
-        )
-        return
     await message.answer(
-        f"<b>Step 5/6</b> \u2014 Gmail address for sending outreach emails\n"
-        f"\n"
-        f"AutoApply sends from your own Gmail (via SMTP), so:\n"
-        f"\u2022 Recruiters see <i>your</i> name in their inbox\n"
-        f"\u2022 Replies land directly in <i>your</i> Gmail \u2014 we never see them\n"
-        f"\u2022 You get 500 emails/day quota (Gmail's normal limit)\n"
-        f"\n"
-        f"\u26a0\ufe0f <b>One small thing:</b> please use a Gmail with "
-        f"<b>2-Step Verification enabled</b>.\n"
-        f"\n"
-        f"<b>Why?</b> It's actually for <i>your</i> protection:\n"
-        f"\U0001f512 Keeps your Gmail account safe from break-ins\n"
-        f"\U0001f6e1\ufe0f Stops anyone (including us) from ever using your real password\n"
-        f"\u2705 Lets you generate an <b>App Password</b> \u2014 a separate, "
-        f"revocable key just for AutoApply\n"
-        f"\n"
-        f"<i>Your real Gmail password is never stored, seen, or even asked for. "
-        f"We only use the App Password, and you can revoke it from your Google "
-        f"account at any time.</i>\n"
-        f"\n"
-        f"<b>Haven't turned on 2-Step Verification yet?</b>\n"
-        f"\U0001f449 Enable it here (takes ~1 minute):\n"
-        f"    \u2192 https://myaccount.google.com/signinoptions/twosv\n"
-        f"\n"
-        f"Once that's done, send your Gmail address below \u2014 e.g. "
-        f"<code>you@gmail.com</code>.\n"
-        f"\n"
-        f"<i>Google Workspace email (you@yourcompany.com) also works as long "
-        f"as it's a Google-hosted mailbox with 2-Step Verification on.</i>",
-        disable_web_page_preview=True,
-    )
-
-
-async def _prompt_smtp_password(message: Message, state: FSMContext, *, smtp_email: str) -> None:
-    await state.set_state(Onboarding.SMTP_PASSWORD)
-    await message.answer(
-        f"\u2705 Got it: <b>{smtp_email}</b>\n\n"
-        f"<b>Step 6/6</b> \u2014 Gmail <b>app password</b> (16 chars)\n"
-        f"\n"
-        f"This lets AutoApply send mail from your Gmail without your real "
-        f"password. <b>It's not your Gmail login password.</b>\n"
-        f"\n"
-        f"<b>How to get it (2 min, one-time):</b>\n"
-        f"\n"
-        f"1\ufe0f\u20e3  Make sure 2-Step Verification is ON\n"
-        f"    \u2192 https://myaccount.google.com/security\n"
-        f"\n"
-        f"2\ufe0f\u20e3  Generate an app password\n"
-        f"    \u2192 https://myaccount.google.com/apppasswords\n"
-        f"    Name it <code>AutoApply</code>, copy the 16-character code.\n"
-        f"\n"
-        f"3\ufe0f\u20e3  Paste it here (spaces are fine; I'll strip them).\n"
-        f"\n"
-        f"\U0001f512 I'll delete your message and store the password encrypted. "
-        f"You can revoke it anytime from the same Google page.",
+        "<b>Step 5/5</b> \u2014 Your email address (for recruiter replies)\n"
+        "\n"
+        "AutoApply sends outreach on your behalf from our verified domain. "
+        "When a recruiter hits <b>Reply</b>, the message goes <i>straight "
+        "to this inbox</i> \u2014 we never see it.\n"
+        "\n"
+        "Send your email address below \u2014 e.g. <code>you@gmail.com</code>. "
+        "Any provider works (Gmail, Outlook, custom domain).",
         disable_web_page_preview=True,
     )
 
@@ -273,16 +205,9 @@ async def _ask_next(message: Message, state: FSMContext) -> None:
     if not (data.get("resume_pdf") or (creds and creds.resume_pdf)):
         await _prompt_resume(message, state)
         return
-    # Step 5 \u2014 SMTP email
+    # Step 5 — user email (Reply-To for recruiter responses)
     if not (creds and creds.smtp_email):
         await _prompt_smtp_email(message, state)
-        return
-    # Step 6 \u2014 SMTP app password (encrypted blob in DB).
-    # Skipped entirely when managed sending (Resend) is active: we send
-    # from our own verified domain, the user's email is used only as the
-    # Reply-To header so recruiter replies still land in their inbox.
-    if not is_managed_sending() and not (creds and creds.smtp_password_encrypted):
-        await _prompt_smtp_password(message, state, smtp_email=creds.smtp_email)
         return
 
     # Nothing missing \u2014 mark active without re-asking anything.
@@ -487,64 +412,6 @@ async def step_smtp_email(message: Message, state: FSMContext) -> None:
     await _ask_next(message, state)
 
 
-# ---------- step 6: SMTP app password ----------
-@router.message(Onboarding.SMTP_PASSWORD)
-async def step_smtp_password(message: Message, state: FSMContext) -> None:
-    raw = (message.text or "").strip()
-    # Strip spaces \u2014 Google formats app passwords as "abcd efgh ijkl mnop"
-    # to make them readable, but the actual password is the 16 chars.
-    password = raw.replace(" ", "")
-    await _silent_delete(message)
-    if len(password) != 16 or not password.isalnum():
-        await message.answer(
-            "That doesn't look like a Gmail app password (should be 16 letters "
-            "and numbers). Get one at https://myaccount.google.com/apppasswords "
-            "and try again."
-        )
-        return
-
-    assert message.from_user is not None
-    async with get_session() as session:
-        creds = await session.get(UserCredentials, message.from_user.id)
-        if creds is None or not creds.smtp_email:
-            await message.answer("Internal error: email row missing. /start to restart.")
-            return
-        smtp_email = creds.smtp_email
-
-    # Verify against Gmail BEFORE we persist \u2014 saves users from discovering
-    # tomorrow that their password was wrong all along.
-    ok, reason = True, ""
-    try:
-        await verifying.delete()
-    except Exception:
-        pass
-    if not ok:
-        log.warning("smtp verify failed for user %s: %s", message.from_user.id, reason)
-        await message.answer(
-            f"\u274c Gmail rejected that password ({reason[:80]}).\n\n"
-            f"Common fixes:\n"
-            f"\u2022 Make sure 2-Step Verification is ON for {smtp_email}\n"
-            f"\u2022 Generate a NEW app password (each is shown only once)\n"
-            f"\u2022 Don't paste your normal Gmail password \u2014 must be an app password\n\n"
-            f"Try again, or /cancel to abort."
-        )
-        return
-
-    async with get_session() as session:
-        creds = await session.get(UserCredentials, message.from_user.id)
-        assert creds is not None
-        creds.smtp_password_encrypted = encrypt(password)
-        await session.commit()
-
-    await message.answer("\u2705 Gmail connected and verified.")
-
-    # Recruiter lookup runs against the operator-pooled Hunter key only
-    # (HUNTER_API_KEY env). A previous revision asked users for their own
-    # Apollo key here, but Apollo's free plan returns 403 API_INACCESSIBLE
-    # on the People Search endpoint, so the key was useless for free-tier
-    # users. Apollo client code is dormant; will re-enable as a Pro perk
-    # once we can subsidise the ~$49/mo Apollo paid plan.
-    await _finish_onboarding(message, state)
 
 
 async def _finish_onboarding(message: Message, state: FSMContext) -> None:

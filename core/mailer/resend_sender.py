@@ -60,17 +60,32 @@ class ResendSender:
 
     @classmethod
     def from_env(cls) -> "ResendSender | None":
-        """Build from env vars. Returns None (caller skips outreach) if either
-        ``RESEND_API_KEY`` or ``RESEND_FROM_DOMAIN`` is missing.
+        """Build from env vars. Returns None (caller skips outreach) when
+        ``RESEND_API_KEY`` is missing.
+
+        Env precedence for the From address:
+        1. ``RESEND_FROM_EMAIL`` (full address, e.g. ``onboarding@resend.dev``)
+           — takes priority. This is the simplest config and matches the
+           Resend free-tier shared sender.
+        2. ``RESEND_FROM_DOMAIN`` (+ optional ``RESEND_FROM_LOCAL``, default
+           ``outreach``) — used when you've verified your own domain.
         """
         api_key = os.environ.get("RESEND_API_KEY")
-        from_domain = os.environ.get("RESEND_FROM_DOMAIN")
-        from_local = os.environ.get("RESEND_FROM_LOCAL", "outreach")
         if not api_key:
             log.error("ResendSender: RESEND_API_KEY env not set; outreach disabled")
             return None
+
+        from_email = (os.environ.get("RESEND_FROM_EMAIL") or "").strip()
+        if from_email and "@" in from_email:
+            from_local, from_domain = from_email.split("@", 1)
+            return cls(api_key=api_key, from_domain=from_domain, from_local=from_local)
+
+        from_domain = os.environ.get("RESEND_FROM_DOMAIN")
+        from_local = os.environ.get("RESEND_FROM_LOCAL", "outreach")
         if not from_domain:
-            log.error("ResendSender: RESEND_FROM_DOMAIN env not set; outreach disabled")
+            log.error(
+                "ResendSender: set RESEND_FROM_EMAIL (or RESEND_FROM_DOMAIN); outreach disabled"
+            )
             return None
         return cls(api_key=api_key, from_domain=from_domain, from_local=from_local)
 
