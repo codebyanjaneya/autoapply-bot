@@ -1,0 +1,36 @@
+# fly.toml \u2014 AutoApply Telegram worker (no HTTP port).
+#
+# Replace `app` below with the unique name you pick during `fly launch`.
+# Region: 'sin' (Singapore) is closest to Neon's ap-southeast-1 and to
+# Telegram's Asia POPs; change if your Neon project is elsewhere.
+
+app = "autoapply-bot"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Run database migrations once before the new release goes live.
+# Fly spins up a temporary container, runs this, then deploys the app
+# container only if it exits 0. Safe to re-run on every deploy because
+# alembic upgrade head is a no-op when already at head.
+[deploy]
+  release_command = "alembic upgrade head"
+
+# Single long-lived worker. Telegram long-polling requires exactly ONE
+# poller per bot token \u2014 do NOT scale this to >1 or you'll hit
+# TelegramConflictError.
+[processes]
+  worker = "python main.py"
+
+# No [http_service] block on purpose: there are no inbound HTTP
+# requests. The bot dials out to api.telegram.org and pulls updates.
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"   # 256mb is enough at idle but Groq/Gemini JSON parsing spikes; 512mb keeps headroom
+
+# Restart policy: if main.py crashes (e.g. Neon hiccup), Fly should
+# bring it back. 'on-failure' is the default; spelled out here for clarity.
+[experimental]
+  auto_rollback = true

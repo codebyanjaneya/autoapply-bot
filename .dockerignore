@@ -1,0 +1,21 @@
+# Exclude from the Docker build context (keeps image small + avoids
+# accidentally baking secrets into the image layer).
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv/
+.pytest_cache
+.mypy_cache
+.ruff_cache
+docker-compose.yml
+README.md
+*.md
+scripts/dry_run*.json

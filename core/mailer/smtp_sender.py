@@ -30,7 +30,7 @@ from core.models import UserCredentials
 log = logging.getLogger(__name__)
 
 _HOST = "smtp.gmail.com"
-_PORT = 587  # STARTTLS (plain socket upgraded to TLS via EHLO)
+_PORT = 465  # STARTTLS (plain socket upgraded to TLS via EHLO)
 _TIMEOUT = 30.0  # seconds; Gmail occasionally takes a beat
 
 
@@ -114,7 +114,7 @@ class SMTPSender:
             msg,
             hostname=_HOST,
             port=_PORT,
-            start_tls=True,
+            use_tls=True,
             username=self.email,
             password=self._password,
             timeout=_TIMEOUT,
@@ -130,7 +130,7 @@ class SMTPSender:
         Returns ``(True, "")`` on success, ``(False, "reason")`` otherwise.
         Never raises.
 
-        TLS note: we pass ``start_tls=True`` to the constructor so connect()
+        TLS note: we pass ``use_tls=True`` to the constructor so connect()
         performs the STARTTLS upgrade atomically on port 587. Calling
         ``smtp.starttls()`` afterwards would raise "Connection already using
         TLS" because aiosmtplib's connect() already upgraded the channel.
@@ -138,7 +138,7 @@ class SMTPSender:
         smtp = aiosmtplib.SMTP(
             hostname=_HOST,
             port=_PORT,
-            start_tls=True,
+            use_tls=True,
             timeout=10.0,
         )
         try:
