@@ -66,8 +66,7 @@ from core.scheduler import build_scheduler  # noqa: E402
 # so the Menu list reads like the natural daily flow.
 _BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="start",          description="Set up your job hunt"),
-    BotCommand(command="howitworks",     description="How the bot works"),
-    BotCommand(command="status",         description="Today's run summary"),
+    BotCommand(command="howitworks",     description="How the bot works"),    BotCommand(command="run",            description="Trigger your pipeline right now"),    BotCommand(command="status",         description="Today's run summary"),
     BotCommand(command="history",        description="All outreach so far (paginated)"),
     BotCommand(command="updaterole",     description="Quick: change roles to search"),
     BotCommand(command="updateresume",   description="Quick: upload a new resume PDF"),

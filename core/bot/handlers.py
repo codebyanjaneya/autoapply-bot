@@ -1,10 +1,13 @@
 """Post-onboarding bot commands: /status, /history, /pause, /resume, /upgrade, /help."""
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message,
@@ -16,9 +19,14 @@ from core.models import (
     Application, AppStatus, DailyRunSummary, Job, OutreachLog,
     User, UserContact, UserPreferences, UserStatus,
 )
+from core.pipeline import run_pipeline_for_user
+from core.repositories import rate_limits as rl
+from core.tenant import load_tenant_context
 
 log = logging.getLogger(__name__)
 router = Router(name="commands")
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 
 async def _require_user(message: Message) -> User | None:
@@ -95,7 +103,118 @@ async def cmd_howitworks(message: Message) -> None:
     )
 
 
-@router.message(Command("status"))
+# ---------------------------------------------------------------------------
+# /run \u2014 manually trigger this user's pipeline right now
+# ---------------------------------------------------------------------------
+# Rate-limited to 1 run per UTC hour via the existing per-day rate-limit
+# counter, keyed on a per-hour action string. The counter resets at the
+# UTC day boundary which is fine: we only ever check (count <= 1) for the
+# current-hour bucket, and stale buckets are ignored.
+
+def _manual_run_action_for(now_utc: datetime) -> str:
+    """Per-hour action key so reserve_slot enforces 1 manual run per hour."""
+    return f"manual_run_h{now_utc.hour:02d}"
+
+
+def _next_hour_ist(now_utc: datetime) -> str:
+    """Human-readable IST timestamp of the next top-of-hour boundary."""
+    next_top = (now_utc + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    return next_top.astimezone(_IST).strftime("%I:%M %p IST").lstrip("0")
+
+
+async def _run_pipeline_and_notify(bot: Bot, user_id: int, chat_id: int) -> None:
+    """Background task: run the full pipeline for one user, then DM result.
+
+    Lives outside the request lifecycle so the /run handler can return
+    immediately. Swallows every exception — the caller is a fire-and-
+    forget asyncio.create_task() and an uncaught error here would only
+    log a noisy 'Task exception was never retrieved' warning.
+    """
+    try:
+        async with get_session() as session:
+            ctx = await load_tenant_context(session, user_id)
+            if ctx is None:
+                await bot.send_message(
+                    chat_id,
+                    "⚠️ Could not load your profile for the manual run. "
+                    "Try /start to repair onboarding.",
+                )
+                return
+            summary = await run_pipeline_for_user(session, ctx)
+
+        if summary.error:
+            text = (
+                f"⚠️ Manual run finished with an error: "
+                f"<code>{summary.error[:200]}</code>\n"
+                f"Scraped {summary.jobs_scraped}, scored {summary.jobs_scored}, "
+                f"sent {summary.outreach_sent}.\n\n"
+                f"🛟 Need help? /support"
+            )
+        elif summary.outreach_sent == 0 and summary.jobs_scraped == 0:
+            text = (
+                "✅ Manual run done — no new jobs found this pass. "
+                "Try /updaterole or /settings to broaden your search."
+            )
+        else:
+            text = (
+                f"✅ <b>Manual run finished.</b>\n"
+                f"Scraped <b>{summary.jobs_scraped}</b>, scored "
+                f"<b>{summary.jobs_scored}</b>, sent "
+                f"<b>{summary.outreach_sent}</b> outreach email(s)."
+            )
+            if summary.outreach_failed:
+                text += f" ({summary.outreach_failed} send failure(s) — /status)"
+        try:
+            await bot.send_message(chat_id, text)
+        except TelegramAPIError:
+            log.exception("/run: failed to deliver result message to user %s", user_id)
+    except Exception:
+        log.exception("/run: pipeline crashed for user %s", user_id)
+        try:
+            await bot.send_message(
+                chat_id,
+                "❌ Manual run hit an unexpected error. We've logged it — "
+                "run /support if it keeps happening.",
+            )
+        except TelegramAPIError:
+            pass
+
+
+@router.message(Command("run"))
+async def cmd_run(message: Message) -> None:
+    user = await _require_user(message)
+    if user is None:
+        return
+    if user.status != UserStatus.active:
+        await message.answer("Finish /start first.")
+        return
+
+    now_utc = datetime.now(timezone.utc)
+    action = _manual_run_action_for(now_utc)
+    async with get_session() as session:
+        allowed, count = await rl.reserve_slot(
+            session, user.id, action, limit=1,
+        )
+        await session.commit()
+
+    if not allowed:
+        await message.answer(
+            f"⏳ You already ran this hour ({count} attempt(s)). "
+            f"Next manual run available at <b>{_next_hour_ist(now_utc)}</b>."
+        )
+        return
+
+    await message.answer(
+        "🚀 Running your pipeline now — check back in ~2 minutes."
+    )
+    # Fire-and-forget: handler returns immediately, pipeline runs in bg,
+    # result is DM'd via _run_pipeline_and_notify.
+    assert message.bot is not None
+    asyncio.create_task(
+        _run_pipeline_and_notify(message.bot, user.id, message.chat.id)
+    )
+
+
 async def cmd_status(message: Message) -> None:
     user = await _require_user(message)
     if user is None:
