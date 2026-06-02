@@ -40,6 +40,7 @@ from core.repositories import jobs as jobs_repo
 from core.repositories import rate_limits as rl
 from core.scoring.groq_scorer import GroqScorer
 from core.scrapers.adzuna import AdzunaScraper
+from core.scrapers.query_expansion import expand_role
 from core.tenant import TenantContext, load_tenant_context
 
 log = logging.getLogger(__name__)
@@ -116,7 +117,26 @@ async def run_pipeline_for_user(
         # ---------- 1+2. Scrape & upsert ----------
         scraper = AdzunaScraper(client=http_client)
         async with scraper:
-            for query in ctx.preferences.role_keywords or [""]:
+            # Expand each user-entered role into 1-3 closely-related queries
+            # (e.g. "python developer" -> + "python engineer", "backend python
+            # developer") so a single role configured by the user reaches
+            # 3x more recruiter postings. Dedup is per (user, source,
+            # external_id) so overlap between expanded queries is harmless.
+            expanded_queries: list[str] = []
+            seen_queries: set[str] = set()
+            for raw_role in ctx.preferences.role_keywords or []:
+                for q in expand_role(raw_role):
+                    key = q.lower()
+                    if key in seen_queries:
+                        continue
+                    seen_queries.add(key)
+                    expanded_queries.append(q)
+            if expanded_queries != list(ctx.preferences.role_keywords or []):
+                log.info(
+                    "pipeline: user=%s role expansion %r -> %r",
+                    ctx.user_id, ctx.preferences.role_keywords, expanded_queries,
+                )
+            for query in expanded_queries or [""]:
                 if not query:
                     continue
                 for loc in ctx.preferences.locations or [""]:
@@ -128,7 +148,15 @@ async def run_pipeline_for_user(
                         log.info("user %s hit scan limit, stopping scrape", ctx.user_id)
                         break
                     try:
-                        scraped = await scraper.search(query, loc, limit=20)
+                        # Fetch up to 60 results (3 Adzuna pages of 20) with a
+                        # 3-day freshness window. Wider net than the original
+                        # 20/7-day defaults so the daily run keeps surfacing
+                        # fresh listings even when the top-of-results stays
+                        # stable day-to-day (dedup is per-user, so re-seen
+                        # IDs are correctly suppressed by upsert_scraped_jobs).
+                        scraped = await scraper.search(
+                            query, loc, limit=60, max_days_old=3,
+                        )
                     except httpx.HTTPStatusError as e:
                         log.warning("adzuna http %s for user %s query=%r loc=%r",
                                     e.response.status_code, ctx.user_id, query, loc)
