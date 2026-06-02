@@ -166,6 +166,14 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
         )
         if snapshot["failed"]:
             text += f" ({snapshot['failed']} SMTP failure(s) \u2014 /status)"
+    # Universal relevance nudge — cheaper to update roles than to
+    # complain about results. Shown on every run regardless of tier/outcome
+    # (except hard errors above, where the error message is louder).
+    if not snapshot["error"]:
+        text += (
+            "\n\n\U0001f4a1 <i>Not getting relevant jobs? Update your roles "
+            "with /updaterole or full settings via /settings.</i>"
+        )
     if snapshot.get("hunter_quota_exhausted"):
         if snapshot.get("tier") == "paid":
             text += (

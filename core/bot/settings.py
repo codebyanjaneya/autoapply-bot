@@ -25,7 +25,7 @@ tier perk once we can subsidise Apollo's ~$49/mo paid plan.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -66,6 +66,31 @@ async def _silent_delete(message: Message) -> None:
         await message.delete()
     except Exception:
         log.warning("settings: could not delete sensitive message %s", message.message_id)
+
+
+def _format_relative(when: datetime | None) -> str:
+    """"3 days ago" / "today" / "2 hours ago" — best-effort, never raises."""
+    if when is None:
+        return "—"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - when
+    if delta < timedelta(minutes=1):
+        return "just now"
+    if delta < timedelta(hours=1):
+        m = int(delta.total_seconds() // 60)
+        return f"{m} minute{'s' if m != 1 else ''} ago"
+    if delta < timedelta(days=1):
+        h = int(delta.total_seconds() // 3600)
+        return f"{h} hour{'s' if h != 1 else ''} ago"
+    d = delta.days
+    if d == 1:
+        return "yesterday"
+    if d < 30:
+        return f"{d} days ago"
+    if d < 365:
+        return f"{d // 30} month{'s' if d // 30 != 1 else ''} ago"
+    return when.strftime("%Y-%m-%d")
 
 
 async def _load_config(user_id: int) -> tuple[User, UserPreferences, UserCredentials] | None:
@@ -119,9 +144,9 @@ def _render_overview(user: User, prefs: UserPreferences, creds: UserCredentials)
     lines.append(f"\u2022 Locations: {locs_txt}")
     if resume_set:
         size_kb = (len(creds.resume_pdf) // 1024) if creds.resume_pdf else 0  # type: ignore[arg-type]
-        when = creds.resume_uploaded_at.strftime("%Y-%m-%d") if creds.resume_uploaded_at else "?"
+        when = _format_relative(creds.resume_uploaded_at)
         rname = creds.resume_filename or "resume.pdf"
-        lines.append(f"\u2022 Resume: \u2705 {rname} ({size_kb} KB, uploaded {when})")
+        lines.append(f"\u2022 Resume: \u2705 {rname} ({size_kb} KB, updated {when})")
     else:
         lines.append("\u2022 Resume: \u274c not uploaded")
     if smtp_set:
@@ -147,6 +172,38 @@ def _render_overview(user: User, prefs: UserPreferences, creds: UserCredentials)
 
 
 # ---------- /settings entry point ----------
+async def _jump_to(message: Message, state: FSMContext, action: str) -> None:
+    """Shared entry point used by /settings callbacks AND the /updaterole,
+    /updateresume shortcut commands. Loads the user, validates they've
+    onboarded, sets the FSM state, sends the prompt."""
+    assert message.from_user is not None
+    bundle = await _load_config(message.from_user.id)
+    if bundle is None:
+        await message.answer("You haven't onboarded yet. Send /start to begin.")
+        return
+    user, _prefs, _creds = bundle
+    if user.status == UserStatus.onboarding:
+        await message.answer(
+            "You're still in the middle of onboarding. Finish /start first."
+        )
+        return
+    prompt, fsm_state = _PROMPTS[action]
+    await state.set_state(fsm_state)
+    await message.answer(prompt, disable_web_page_preview=True)
+
+
+@router.message(Command("updaterole", "updateroles"))
+async def cmd_updaterole(message: Message, state: FSMContext) -> None:
+    """Shortcut: jump straight into the roles editor without /settings."""
+    await _jump_to(message, state, "roles")
+
+
+@router.message(Command("updateresume"))
+async def cmd_updateresume(message: Message, state: FSMContext) -> None:
+    """Shortcut: jump straight into the resume-upload step."""
+    await _jump_to(message, state, "resume")
+
+
 @router.message(Command("settings"))
 async def cmd_settings(message: Message, state: FSMContext) -> None:
     assert message.from_user is not None
@@ -431,8 +488,10 @@ async def set_resume(message: Message, state: FSMContext) -> None:
         await session.commit()
     await state.clear()
     await message.answer(
-        f"\u2705 Resume updated ({len(resume_bytes) // 1024} KB). "
-        f"/settings to view all config."
+        f"\u2705 <b>Resume updated</b> ({len(resume_bytes) // 1024} KB).\n\n"
+        f"Your next outreach emails will use the new resume \u2014 the daily "
+        f"run tomorrow morning will pick it up automatically. /settings to "
+        f"view all config."
     )
 
 
