@@ -51,11 +51,31 @@ from aiogram import Bot, Dispatcher  # noqa: E402
 from aiogram.client.default import DefaultBotProperties  # noqa: E402
 from aiogram.enums import ParseMode  # noqa: E402
 from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
+from aiogram.types import BotCommand  # noqa: E402
 from aiohttp import web  # noqa: E402
 
 from core.bot import commands_router, onboarding_router, settings_router  # noqa: E402
 from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
+
+
+# Order = order shown in Telegram's Menu button. Keep most-used at the top
+# so the Menu list reads like the natural daily flow.
+_BOT_COMMANDS: list[BotCommand] = [
+    BotCommand(command="start",        description="Set up your job hunt"),
+    BotCommand(command="howitworks",   description="How the bot works"),
+    BotCommand(command="status",       description="Today's run summary"),
+    BotCommand(command="settime",      description="Change your daily run time"),
+    BotCommand(command="settings",     description="Update your preferences"),
+    BotCommand(command="upgrade",      description="View Pro plan & pricing"),
+    BotCommand(command="features",     description="What Pro includes"),
+    BotCommand(command="subscription", description="Your current plan"),
+    BotCommand(command="referral",     description="Invite friends, earn free months"),
+    BotCommand(command="pause",        description="Pause daily runs"),
+    BotCommand(command="resume",       description="Resume daily runs"),
+    BotCommand(command="restart",      description="Redo onboarding"),
+    BotCommand(command="help",         description="All commands"),
+]
 
 
 async def amain() -> None:
@@ -107,6 +127,18 @@ async def amain() -> None:
 
     me = await bot.get_me()
     log.info("bot online as @%s (id=%s)", me.username, me.id)
+
+    # Register the slash-command list with Telegram so the Menu button at
+    # the bottom-left of every chat shows them automatically. set_my_commands
+    # is idempotent \u2014 cheap to call on every startup, and updates the list
+    # immediately for all users (no BotFather round-trip needed).
+    try:
+        await bot.set_my_commands(_BOT_COMMANDS)
+        log.info("registered %d bot commands with Telegram", len(_BOT_COMMANDS))
+    except Exception:
+        # Don't crash startup if Telegram is briefly unavailable \u2014 the bot
+        # still works, the Menu button just won't show the latest list.
+        log.exception("set_my_commands failed (non-fatal)")
 
     try:
         # drop_pending_updates: ignore the backlog from while the bot was offline.

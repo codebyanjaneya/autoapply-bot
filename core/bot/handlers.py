@@ -79,23 +79,11 @@ async def _require_user(message: Message) -> User | None:
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
-    # TODO(week-6): add "• /add_contacts — paste your own recruiter emails" + sibling commands
     await message.answer(
         "<b>AutoApply Bot</b>\n\n"
-        "\u2022 /start \u2014 begin onboarding (or welcome-back if you're already set up)\n"
-        "\u2022 /howitworks \u2014 7-step walkthrough of what the bot does\n"
-        "\u2022 /settings \u2014 update Gmail, roles, resume, etc. without redoing /start\n"
-        "\u2022 /settime \u2014 change your daily run time (default 9 AM IST)\n"
-        "\u2022 /status \u2014 today's pipeline summary + recent outreach\n"
-        "\u2022 /pause \u2014 stop daily pipeline runs\n"
-        "\u2022 /resume \u2014 resume daily runs\n"
-        "\u2022 /upgrade \u2014 unlock Pro (\u20b9500/mo)\n"
-        "\u2022 /subscription \u2014 see your current plan + days remaining\n"
-        "\u2022 /features \u2014 everything Pro includes\n"
-        "\u2022 /referral \u2014 your invite link (earn 1 month free per upgrade)\n"
-        "\u2022 /restart \u2014 redo onboarding from scratch (existing data kept until you finish)\n"
-        "\u2022 /cancel \u2014 abort the current wizard step\n"
-        "\u2022 /help \u2014 this message"
+        "Tap the <b>Menu</b> button (bottom-left of the chat) to see "
+        "every command \u2014 you don't need to memorise any of them.\n\n"
+        "New here? Try /howitworks for a quick walkthrough."
     )
 
 
