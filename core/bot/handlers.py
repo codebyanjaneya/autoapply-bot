@@ -1,50 +1,4 @@
-"""Post-onboarding bot commands: /status, /pause, /resume, /upgrade, /help."""
-# =============================================================================
-# TODO(week-6): Custom contact list feature \u2014 implement after Razorpay lands.
-#
-# User story: power users already have recruiter emails (from their own
-# research, alumni network, LinkedIn). Let them paste those in and bypass
-# Hunter/Apollo entirely \u2014 zero lookup cost, 100% hit rate.
-#
-# New commands to add HERE:
-#   /add_contacts \u2014 accept either:
-#                     (a) comma-separated emails in the next message, OR
-#                     (b) a CSV upload with columns: email[,name,company,position]
-#                   Validate each email; store via repository; reply with
-#                   "Added N contacts. /contacts to view, /clear_contacts to
-#                   start over."
-#   /contacts     \u2014 paginated list (first 20 + "showing X of Y").
-#   /clear_contacts \u2014 confirmation flow (button or "type CONFIRM"), then wipe.
-#
-# Data model (new migration 0003):
-#   class UserContact(Base):
-#       __tablename__ = "user_contacts"
-#       id           PK
-#       user_id      FK users.id ON DELETE CASCADE, indexed
-#       email        String(254), NOT NULL
-#       name         String(128) nullable
-#       company      String(128) nullable
-#       position     String(128) nullable
-#       added_at     timestamptz default now()
-#       last_used_at timestamptz nullable
-#       UNIQUE(user_id, email)
-#
-# Pipeline integration (core/outreach.py):
-#   Before calling RecruiterFinder, check if the application's company has a
-#   UserContact match. If yes \u2014 use that, set source="user-contact", skip
-#   Hunter/Apollo entirely, no lookup cost. Set last_used_at on send.
-#   Fall through to RecruiterFinder when no match.
-#
-# Messaging hooks already TODO'd in:
-#   - cmd_features (this file)        \u2014 add "Bring your own contacts" bullet
-#   - cmd_help (this file)            \u2014 list the three new commands
-#   - cmd_upgrade (this file)         \u2014 mention as a Pro+free perk
-#   - _finish_onboarding (onboarding) \u2014 "Pro tip" line
-#   - _notify_user (scheduler)        \u2014 nudge when no_recruiter=N and sent=0
-#
-# All five sites currently advertise NOTHING about this feature so we don't
-# ship broken /commands. Wire copy + handlers together in one Week 6 PR.
-# =============================================================================
+"""Post-onboarding bot commands: /status, /history, /pause, /resume, /upgrade, /help."""
 from __future__ import annotations
 
 import logging
@@ -59,7 +13,8 @@ from sqlalchemy import select
 
 from core.db import get_session
 from core.models import (
-    Application, DailyRunSummary, Job, OutreachLog, User, UserPreferences, UserStatus,
+    Application, AppStatus, DailyRunSummary, Job, OutreachLog,
+    User, UserContact, UserPreferences, UserStatus,
 )
 
 log = logging.getLogger(__name__)
@@ -149,16 +104,21 @@ async def cmd_status(message: Message) -> None:
         summary = await session.get(DailyRunSummary, (user.id, today))
         prefs = await session.get(UserPreferences, user.id)
 
-        # Top 3 outreach attempts today.
+        # Last 10 outreach attempts (any day) \u2014 the "trust" view that
+        # answers "which companies has the bot already emailed for me?"
         log_stmt = (
             select(OutreachLog, Application, Job)
             .join(Application, Application.id == OutreachLog.application_id)
             .join(Job, Job.id == Application.job_id)
             .where(OutreachLog.user_id == user.id)
             .order_by(OutreachLog.sent_at.desc())
-            .limit(5)
+            .limit(10)
         )
         rows = (await session.execute(log_stmt)).all()
+
+        # Pre-load this user's contact name map so we can show a friendly
+        # "(Jane Doe)" next to manually-supplied emails without an N+1.
+        contact_names = await _build_contact_name_map(session, user.id)
 
     status_emoji = {
         UserStatus.active: "\u25b6\ufe0f active",
@@ -189,20 +149,152 @@ async def cmd_status(message: Message) -> None:
 
     if rows:
         lines.append("")
-        lines.append("<b>Recent outreach</b>")
-        for ol, _app, job in rows:
-            if ol.error:
-                marker = "\u274c" if "[NO-SEND]" not in ol.error else "\U0001f441"
-                tail = f" \u2014 <i>{_short(ol.error, 80)}</i>"
-            else:
-                marker = "\u2705"
-                tail = ""
-            lines.append(
-                f"  {marker} {ol.sent_at.strftime('%H:%M')} "
-                f"<b>{_short(job.company, 25)}</b> \u2192 {ol.to_email}{tail}"
-            )
+        lines.append("<b>Last 10 outreach attempts</b>")
+        for ol, app, job in rows:
+            lines.append(_format_outreach_line(ol, app, job, contact_names))
+        lines.append("")
+        lines.append("<i>Full list: /history</i>")
 
     await message.answer("\n".join(lines))
+
+
+def _format_outreach_line(
+    ol: OutreachLog,
+    app: Application,
+    job: Job,
+    contact_names: dict[str, str],
+) -> str:
+    """One line per outreach row, e.g.
+
+        \u2705 28 May \u2014 <b>Google</b> \u2192 john@google.com (Jane Doe) \U0001f4e9 Replied
+    """
+    if ol.error:
+        marker = "\U0001f441" if "[NO-SEND]" in ol.error else "\u274c"
+    else:
+        marker = "\u2705"
+    when = ol.sent_at.strftime("%d %b") if ol.sent_at else "?"
+    name = contact_names.get((ol.to_email or "").lower())
+    name_part = f" ({name})" if name else " (Recruiter)"
+    replied = " \U0001f4e9 Replied" if app.status == AppStatus.replied else ""
+    err_tail = f" \u2014 <i>{_short(ol.error, 60)}</i>" if (ol.error and "[NO-SEND]" not in ol.error) else ""
+    return (
+        f"  {marker} {when} \u2014 <b>{_short(job.company, 25)}</b> "
+        f"\u2192 {ol.to_email}{name_part}{replied}{err_tail}"
+    )
+
+
+async def _build_contact_name_map(session, user_id: int) -> dict[str, str]:
+    """``{lower(email): name}`` for the user's saved UserContact rows.
+
+    Returns {} when the user has no contacts \u2014 callers fall back to a
+    generic "(Recruiter)" label.
+    """
+    stmt = (
+        select(UserContact.email, UserContact.name)
+        .where(UserContact.user_id == user_id)
+        .where(UserContact.name.is_not(None))
+    )
+    rows = (await session.execute(stmt)).all()
+    return {(e or "").lower(): n for e, n in rows if e and n}
+
+
+# ---------- /history: paginated full outreach log ----------
+_HISTORY_PAGE_SIZE = 10
+
+
+def _history_kb(page: int, total_pages: int) -> InlineKeyboardMarkup | None:
+    """Prev/Next buttons. Returns None when only one page exists."""
+    if total_pages <= 1:
+        return None
+    buttons: list[InlineKeyboardButton] = []
+    if page > 0:
+        buttons.append(InlineKeyboardButton(text="\u2b05\ufe0f Prev",
+                                            callback_data=f"history:page:{page - 1}"))
+    buttons.append(InlineKeyboardButton(
+        text=f"Page {page + 1}/{total_pages}", callback_data="history:noop",
+    ))
+    if page < total_pages - 1:
+        buttons.append(InlineKeyboardButton(text="Next \u27a1\ufe0f",
+                                            callback_data=f"history:page:{page + 1}"))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
+
+async def _render_history(user_id: int, page: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Build the message text + keyboard for the given page (0-indexed)."""
+    async with get_session() as session:
+        from sqlalchemy import func as sql_func
+        total = int((await session.execute(
+            select(sql_func.count()).select_from(OutreachLog)
+            .where(OutreachLog.user_id == user_id)
+        )).scalar_one())
+        if total == 0:
+            return (
+                "\U0001f4ed You have no outreach history yet \u2014 nothing has "
+                "been emailed on your behalf so far. The next daily run will "
+                "populate this list.",
+                None,
+            )
+        total_pages = max(1, (total + _HISTORY_PAGE_SIZE - 1) // _HISTORY_PAGE_SIZE)
+        page = max(0, min(page, total_pages - 1))
+        offset = page * _HISTORY_PAGE_SIZE
+
+        stmt = (
+            select(OutreachLog, Application, Job)
+            .join(Application, Application.id == OutreachLog.application_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(OutreachLog.user_id == user_id)
+            .order_by(OutreachLog.sent_at.desc())
+            .limit(_HISTORY_PAGE_SIZE)
+            .offset(offset)
+        )
+        rows = (await session.execute(stmt)).all()
+        contact_names = await _build_contact_name_map(session, user_id)
+
+    header = (
+        f"\U0001f4dc <b>Outreach history</b> \u2014 {total} total, "
+        f"page {page + 1}/{total_pages}\n"
+    )
+    body_lines = []
+    for ol, app, job in rows:
+        body_lines.append(
+            f"\u2022 <b>{_short(job.company, 25)}</b> \u2014 "
+            f"<i>{_short(job.title, 45)}</i>\n"
+            f"  {_format_outreach_line(ol, app, job, contact_names).lstrip()}"
+        )
+    return header + "\n".join(body_lines), _history_kb(page, total_pages)
+
+
+@router.message(Command("history"))
+async def cmd_history(message: Message) -> None:
+    user = await _require_user(message)
+    if user is None:
+        return
+    text, kb = await _render_history(user.id, page=0)
+    await message.answer(text, reply_markup=kb, disable_web_page_preview=True)
+
+
+@router.callback_query(F.data.startswith("history:page:"))
+async def cb_history_page(cb: CallbackQuery) -> None:
+    assert cb.data is not None and cb.from_user is not None
+    try:
+        page = int(cb.data.rsplit(":", 1)[1])
+    except ValueError:
+        await cb.answer()
+        return
+    text, kb = await _render_history(cb.from_user.id, page=page)
+    if isinstance(cb.message, Message):
+        try:
+            await cb.message.edit_text(text, reply_markup=kb, disable_web_page_preview=True)
+        except Exception:
+            # Edit fails when content is identical (e.g. spam-clicking the
+            # noop "Page N/M" button). Telegram raises; we swallow.
+            pass
+    await cb.answer()
+
+
+@router.callback_query(F.data == "history:noop")
+async def cb_history_noop(cb: CallbackQuery) -> None:
+    await cb.answer()
 
 
 @router.message(Command("pause"))

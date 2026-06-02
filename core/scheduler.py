@@ -34,7 +34,9 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from core.db import get_session
-from core.models import DailyRunSummary, User, UserPreferences, UserStatus
+from core.models import (
+    Application, DailyRunSummary, Job, OutreachLog, User, UserPreferences, UserStatus,
+)
 from core.pipeline import run_pipeline_for_user
 from core.tenant import load_tenant_context
 
@@ -129,6 +131,23 @@ async def _run_one_user(bot: Bot, user_id: int) -> None:
         )
         chat_id = ctx.user.telegram_chat_id
         summary = await run_pipeline_for_user(session, ctx)
+        # Companies we successfully emailed today, in send order. Pulled
+        # right after the pipeline so the user sees concrete names rather
+        # than just counters in the daily summary.
+        today_date = datetime.now(_IST).date()
+        companies_stmt = (
+            select(Job.company)
+            .join(Application, Application.job_id == Job.id)
+            .join(OutreachLog, OutreachLog.application_id == Application.id)
+            .where(OutreachLog.user_id == user_id)
+            .where(OutreachLog.error.is_(None))  # successful sends only
+            .where(OutreachLog.sent_at >= datetime.combine(today_date, datetime.min.time(), tzinfo=_IST))
+            .order_by(OutreachLog.sent_at.asc())
+        )
+        companies_today = [c for (c,) in (await session.execute(companies_stmt)).all() if c]
+        # De-dupe while preserving order (one company can have multiple jobs).
+        _seen: set[str] = set()
+        companies_today = [c for c in companies_today if not (c in _seen or _seen.add(c))]
         # Capture values we'll use after the session closes \u2014 the ORM
         # instance becomes unusable post-commit.
         snapshot = {
@@ -139,6 +158,7 @@ async def _run_one_user(bot: Bot, user_id: int) -> None:
             "error": summary.error,
             "hunter_quota_exhausted": getattr(summary, "hunter_quota_exhausted", False),
             "no_recruiter": getattr(summary, "no_recruiter_count", 0),
+            "companies_today": companies_today,
             "tier": ctx.user.subscription_tier.value,
         }
         # session commits on context exit
@@ -167,6 +187,17 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
         )
         if snapshot["failed"]:
             text += f" ({snapshot['failed']} SMTP failure(s) \u2014 /status)"
+        # Concrete "who got emailed" line so the user trusts what the bot
+        # did on their behalf today. Cap the rendered list so we don't blow
+        # Telegram's 4096-char message ceiling on a quota-50 paid user.
+        companies = snapshot.get("companies_today") or []
+        if companies:
+            shown = companies[:10]
+            extra = f" \u2026and {len(companies) - len(shown)} more" if len(companies) > len(shown) else ""
+            text += (
+                f"\n\n\U0001f4e7 <i>Today I emailed recruiters at:</i> "
+                f"<b>{', '.join(shown)}</b>{extra}"
+            )
     # Universal relevance nudge — cheaper to update roles than to
     # complain about results. Shown on every run regardless of tier/outcome
     # (except hard errors above, where the error message is louder).
