@@ -54,7 +54,7 @@ from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
 from aiogram.types import BotCommand  # noqa: E402
 from aiohttp import web  # noqa: E402
 
-from core.bot import commands_router, onboarding_router, settings_router  # noqa: E402
+from core.bot import commands_router, contacts_router, onboarding_router, settings_router  # noqa: E402
 from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
 
@@ -62,21 +62,24 @@ from core.scheduler import build_scheduler  # noqa: E402
 # Order = order shown in Telegram's Menu button. Keep most-used at the top
 # so the Menu list reads like the natural daily flow.
 _BOT_COMMANDS: list[BotCommand] = [
-    BotCommand(command="start",        description="Set up your job hunt"),
-    BotCommand(command="howitworks",   description="How the bot works"),
-    BotCommand(command="status",       description="Today's run summary"),
-    BotCommand(command="updaterole",   description="Quick: change roles to search"),
-    BotCommand(command="updateresume", description="Quick: upload a new resume PDF"),
-    BotCommand(command="settime",      description="Change your daily run time"),
-    BotCommand(command="settings",     description="Update all preferences"),
-    BotCommand(command="upgrade",      description="View Pro plan & pricing"),
-    BotCommand(command="features",     description="What Pro includes"),
-    BotCommand(command="subscription", description="Your current plan"),
-    BotCommand(command="referral",     description="Invite friends, earn free months"),
-    BotCommand(command="pause",        description="Pause daily runs"),
-    BotCommand(command="resume",       description="Resume daily runs"),
-    BotCommand(command="restart",      description="Redo onboarding"),
-    BotCommand(command="help",         description="All commands"),
+    BotCommand(command="start",          description="Set up your job hunt"),
+    BotCommand(command="howitworks",     description="How the bot works"),
+    BotCommand(command="status",         description="Today's run summary"),
+    BotCommand(command="updaterole",     description="Quick: change roles to search"),
+    BotCommand(command="updateresume",   description="Quick: upload a new resume PDF"),
+    BotCommand(command="add_contacts",   description="Add recruiter emails you know"),
+    BotCommand(command="contacts",       description="View saved recruiter contacts"),
+    BotCommand(command="clear_contacts", description="Remove all saved contacts"),
+    BotCommand(command="settime",        description="Change your daily run time"),
+    BotCommand(command="settings",       description="Update all preferences"),
+    BotCommand(command="upgrade",        description="View Pro plan & pricing"),
+    BotCommand(command="features",       description="What Pro includes"),
+    BotCommand(command="subscription",   description="Your current plan"),
+    BotCommand(command="referral",       description="Invite friends, earn free months"),
+    BotCommand(command="pause",          description="Pause daily runs"),
+    BotCommand(command="resume",         description="Resume daily runs"),
+    BotCommand(command="restart",        description="Redo onboarding"),
+    BotCommand(command="help",           description="All commands"),
 ]
 
 
@@ -91,6 +94,7 @@ async def amain() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(onboarding_router)
     dp.include_router(settings_router)
+    dp.include_router(contacts_router)
     dp.include_router(commands_router)
 
     scheduler = build_scheduler(bot=bot)

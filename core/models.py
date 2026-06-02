@@ -416,3 +416,30 @@ class PaymentEvent(Base):
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processing_error: Mapped[str | None] = mapped_column(Text)
+
+
+# ---------- user-supplied recruiter contacts (week 6: /add_contacts) ----------
+class UserContact(Base):
+    """A recruiter email the user pasted themselves.
+
+    Checked BEFORE Hunter during outreach: if a contact's ``company`` matches
+    the scraped job's company (case-insensitive), we use that email and
+    skip the Hunter lookup entirely (saves quota + better reply rate since
+    it's a known contact).
+    """
+    __tablename__ = "user_contacts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    company: Mapped[str | None] = mapped_column(String(256))
+    name: Mapped[str | None] = mapped_column(String(128))
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "email", name="uq_user_contacts_user_email"),
+    )

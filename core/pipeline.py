@@ -36,6 +36,7 @@ from core.mailer.smtp_sender import SMTPSender
 from core.models import DailyRunSummary, JobSource
 from core.outreach import OutreachOutcome, send_outreach_for_application
 from core.repositories import applications as apps_repo
+from core.repositories import contacts as contacts_repo
 from core.repositories import jobs as jobs_repo
 from core.repositories import rate_limits as rl
 from core.scoring.groq_scorer import GroqScorer
@@ -197,12 +198,13 @@ async def run_pipeline_for_user(
     )
 
     # ---------- 4. Outreach (own session per send) ----------
-    sent, failed, hunter_quota_exhausted = await _run_outreach_phase(ctx, no_send=no_send)
+    sent, failed, no_recruiter, hunter_quota_exhausted = await _run_outreach_phase(ctx, no_send=no_send)
     summary.outreach_sent = sent
     summary.outreach_failed = failed
-    # In-memory flag (not persisted) consumed by scheduler._notify_user
-    # to append the /upgrade pitch to today's Telegram summary.
+    # In-memory flags (not persisted) consumed by scheduler._notify_user
+    # to decorate today's Telegram summary with the right nudges.
     summary.hunter_quota_exhausted = hunter_quota_exhausted  # type: ignore[attr-defined]
+    summary.no_recruiter_count = no_recruiter  # type: ignore[attr-defined]
 
     # Use merge() so a same-day re-run UPDATEs instead of duplicate-PK-erroring.
     # In production this matters because APScheduler may retry a crashed user.
@@ -216,12 +218,15 @@ async def run_pipeline_for_user(
     return summary
 
 
-async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> tuple[int, int, bool]:
+async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> tuple[int, int, int, bool]:
     """Send up to `daily_outreach_limit` emails today.
 
-    Returns ``(sent, failed, hunter_quota_exhausted)``. The third element is
-    True when Hunter returned HTTP 429 during this run — caller (scheduler)
-    appends the /upgrade pitch to the Telegram notification.
+    Returns ``(sent, failed, no_recruiter, hunter_quota_exhausted)``. The
+    last element is True when Hunter returned HTTP 429 during this run —
+    caller (scheduler) appends the /upgrade pitch to the Telegram
+    notification. ``no_recruiter`` is the count of candidate applications
+    where neither a manual contact nor Hunter could surface a recruiter —
+    used to decide whether to nudge the user to /add_contacts.
 
     Skips silently (returns 0,0,False) when:
     - User has no Hunter key (free tier without one provided)
@@ -234,7 +239,7 @@ async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> t
     """
     hunter = build_recruiter_finder(ctx)
     if hunter is None:
-        return (0, 0, False)
+        return (0, 0, 0, False)
 
     # SMTPSender is built per-user from their encrypted Gmail app password.
     # In no-send mode we still need a sender object for the
@@ -247,7 +252,16 @@ async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> t
             sender = SMTPSender(email="dry-run@example.invalid", password="unused")
         else:
             log.info("user %s has no SMTP credentials; outreach skipped", ctx.user_id)
-            return (0, 0, False)
+            return (0, 0, 0, False)
+
+    # Pre-load the user's manual contact list ONCE per run, keyed by
+    # lower(company). Each per-send call gets the same map so a hit avoids
+    # a Hunter lookup entirely.
+    async with get_session() as session:
+        manual_contacts = await contacts_repo.get_company_map(session, ctx.user_id)
+    if manual_contacts:
+        log.info("user %s has %d manual contacts with company tags",
+                 ctx.user_id, len(manual_contacts))
 
     # Grab candidate IDs in one short-lived session so we don't hold a
     # transaction open while making slow HTTP calls.
@@ -260,7 +274,7 @@ async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> t
 
     if not candidate_ids:
         log.info("user %s has no outreach-ready applications today", ctx.user_id)
-        return (0, 0, False)
+        return (0, 0, 0, False)
 
     sent = 0
     failed = 0
@@ -288,6 +302,7 @@ async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> t
                     hunter=hunter, smtp=sender,
                     daily_outreach_limit=ctx.user.daily_outreach_limit,
                     no_send=no_send,
+                    manual_contacts=manual_contacts,
                 )
             # Outcome accounting happens AFTER the session closes (counters
             # are local Python ints, not DB state).
@@ -311,4 +326,4 @@ async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> t
              "hunter_quota_exhausted=%s (quota=%s, candidates_tried=%s)",
              ctx.user_id, sent, failed, no_recruiter, hunter_quota_exhausted,
              ctx.user.daily_outreach_limit, len(candidate_ids))
-    return (sent, failed, hunter_quota_exhausted)
+    return (sent, failed, no_recruiter, hunter_quota_exhausted)

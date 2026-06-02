@@ -138,6 +138,7 @@ async def _run_one_user(bot: Bot, user_id: int) -> None:
             "failed": summary.outreach_failed,
             "error": summary.error,
             "hunter_quota_exhausted": getattr(summary, "hunter_quota_exhausted", False),
+            "no_recruiter": getattr(summary, "no_recruiter_count", 0),
             "tier": ctx.user.subscription_tier.value,
         }
         # session commits on context exit
@@ -173,6 +174,19 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
         text += (
             "\n\n\U0001f4a1 <i>Not getting relevant jobs? Update your roles "
             "with /updaterole or full settings via /settings.</i>"
+        )
+    # No-recruiter nudge — fired when we scored jobs but couldn't find
+    # ANYONE to email at any of those companies. Direct contacts the user
+    # supplies via /add_contacts skip Hunter entirely and ship every time.
+    if (
+        not snapshot["error"]
+        and snapshot.get("no_recruiter", 0) >= 3
+        and snapshot.get("sent", 0) == 0
+    ):
+        text += (
+            "\n\n\U0001f4ec <i>Know any recruiters personally? Add their "
+            "emails with /add_contacts — we'll reach out for you directly "
+            "next run, no Hunter lookup needed.</i>"
         )
     if snapshot.get("hunter_quota_exhausted"):
         if snapshot.get("tier") == "paid":

@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.enrich.hunter import HunterQuotaExhausted, Recruiter
 from core.enrich.recruiter_finder import RecruiterFinder
 from core.mailer.smtp_sender import SMTPSender
-from core.models import Application, AppStatus, Job, OutreachLog
+from core.models import Application, AppStatus, Job, OutreachLog, UserContact
 from core.repositories import rate_limits as rl
 from core.tenant import TenantContext
 
@@ -58,11 +58,17 @@ async def send_outreach_for_application(
     smtp: SMTPSender,
     daily_outreach_limit: int,
     no_send: bool = False,
+    manual_contacts: dict[str, UserContact] | None = None,
 ) -> OutreachOutcome:
     """Run the outreach pipeline for one application.
 
     Returns an :class:`OutreachOutcome` describing what happened so the
     pipeline can update counters and decide whether to keep looping.
+
+    ``manual_contacts`` maps ``lower(company) -> UserContact``. When the
+    job's company hits in this map we use that email DIRECTLY and skip the
+    Hunter lookup entirely (saves quota + the contact is a known person
+    rather than a guessed pattern). Source is logged as ``manual``.
 
     Logging is intentionally chatty at INFO level so ``dry_run.py`` output
     shows exactly which company was looked up, whether Hunter found a
@@ -81,22 +87,42 @@ async def send_outreach_for_application(
     company = job.company
     log.info("outreach[app=%s] lookup company=%r (score=%.1f)", app.id, company, app.score)
 
-    # ---------- 1. Recruiter lookup (FREE \u2014 no slot consumed yet) ----------
-    try:
-        recruiter = await hunter.find_recruiter(company)
-    except HunterQuotaExhausted as e:
-        # Free plan's 25/month gone (or pooled key exhausted). No slot
-        # consumed; pipeline will halt the loop and notify the user.
-        log.warning("outreach[app=%s] HUNTER QUOTA EXHAUSTED: %s", app.id, e)
-        return OutreachOutcome.hunter_quota_exhausted
-    except Exception as e:
-        # HunterClient already catches HTTP/network errors and returns None.
-        # An exception here means something genuinely unexpected (bug, OOM, ...).
-        log.exception("outreach[app=%s] HUNTER CRASHED for company=%r: %s",
-                      app.id, company, e)
-        app.status = AppStatus.skipped
-        _append_note(app, f"hunter-crashed: {type(e).__name__}: {e}")
-        return OutreachOutcome.no_recruiter
+    # ---------- 1. Manual contact short-circuit (FREE \u2014 no slot consumed yet) ----------
+    # If the user pasted a recruiter email tagged with this company via
+    # /add_contacts, use it directly and skip Hunter. Big quota win for
+    # users with known recruiter contacts.
+    recruiter: Recruiter | None = None
+    if manual_contacts and company:
+        match = manual_contacts.get(company.strip().lower())
+        if match is not None:
+            recruiter = Recruiter(
+                email=match.email,
+                source="manual",
+                name=match.name,
+                position=None,
+            )
+            log.info(
+                "outreach[app=%s] MANUAL CONTACT hit for company=%r email=%s",
+                app.id, company, recruiter.email,
+            )
+
+    # ---------- 1b. Recruiter lookup (FREE \u2014 no slot consumed yet) ----------
+    if recruiter is None:
+        try:
+            recruiter = await hunter.find_recruiter(company)
+        except HunterQuotaExhausted as e:
+            # Free plan's 25/month gone (or pooled key exhausted). No slot
+            # consumed; pipeline will halt the loop and notify the user.
+            log.warning("outreach[app=%s] HUNTER QUOTA EXHAUSTED: %s", app.id, e)
+            return OutreachOutcome.hunter_quota_exhausted
+        except Exception as e:
+            # HunterClient already catches HTTP/network errors and returns None.
+            # An exception here means something genuinely unexpected (bug, OOM, ...).
+            log.exception("outreach[app=%s] HUNTER CRASHED for company=%r: %s",
+                          app.id, company, e)
+            app.status = AppStatus.skipped
+            _append_note(app, f"hunter-crashed: {type(e).__name__}: {e}")
+            return OutreachOutcome.no_recruiter
 
     if recruiter is None:
         log.info("outreach[app=%s] NO RECRUITER for company=%r \u2014 skipping (no slot consumed)",
