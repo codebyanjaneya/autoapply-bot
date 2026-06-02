@@ -82,12 +82,19 @@ async def run_pipeline_for_user(
     # were even loaded and which roles/locations we're actually scraping.
     creds = ctx.credentials
     prefs = ctx.preferences
-    smtp_status = (
-        f"smtp=OK<{creds.smtp_email}>"
-        if creds.smtp_email and creds.smtp_password_encrypted is not None
-        else f"smtp=MISSING(email={'set' if creds.smtp_email else 'none'},"
-             f"pw={'set' if creds.smtp_password_encrypted is not None else 'none'})"
-    )
+    if is_managed_sending():
+        smtp_status = (
+            f"sender=resend(reply_to={creds.smtp_email})"
+            if creds.smtp_email
+            else "sender=resend(reply_to=MISSING)"
+        )
+    else:
+        smtp_status = (
+            f"sender=gmail-smtp<{creds.smtp_email}>"
+            if creds.smtp_email and creds.smtp_password_encrypted is not None
+            else f"sender=gmail-smtp-MISSING(email={'set' if creds.smtp_email else 'none'},"
+                 f"pw={'set' if creds.smtp_password_encrypted is not None else 'none'})"
+        )
     apollo_status = "apollo=OK" if creds.apollo_api_key_encrypted is not None else "apollo=MISSING"
     log.info(
         "pipeline start: user=%s tier=%s status=%s %s %s no_send=%s",
