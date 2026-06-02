@@ -5,10 +5,8 @@ Architecture:
   password, 16 chars from https://myaccount.google.com/apppasswords).
 - We store the password encrypted on UserCredentials.smtp_password_encrypted
   (Fernet, see core/crypto.py).
-- At send time we decrypt, send via aiosmtplib over SSL:465, and discard the
-  plaintext immediately. Port 465 (implicit TLS) instead of 587 (STARTTLS)
-  because Railway / many cloud providers block outbound :587 \u2014 :465 is
-  far more reliably reachable.
+- At send time we decrypt, send via aiosmtplib over STARTTLS:587, and
+  discard the plaintext immediately.
 - The From: address is the user's own email \u2014 essential for DKIM/SPF
   alignment and to avoid "via gmail.com" warnings in the recipient's client.
 
@@ -32,11 +30,7 @@ from core.models import UserCredentials
 log = logging.getLogger(__name__)
 
 _HOST = "smtp.gmail.com"
-# Implicit-TLS (SSL) port. We previously used 587 (STARTTLS) which is
-# blocked by Railway's outbound firewall \u2014 connecting timed out for
-# every user during onboarding's SMTP verify. Port 465 wraps the socket
-# in TLS from the first byte and is reachable from Railway/Fly/Render.
-_PORT = 465
+_PORT = 587  # STARTTLS (plain socket upgraded to TLS via EHLO)
 _TIMEOUT = 30.0  # seconds; Gmail occasionally takes a beat
 
 
@@ -120,7 +114,7 @@ class SMTPSender:
             msg,
             hostname=_HOST,
             port=_PORT,
-            use_tls=True,  # implicit TLS for :465 (see _PORT comment)
+            start_tls=True,
             username=self.email,
             password=self._password,
             timeout=_TIMEOUT,
@@ -136,15 +130,15 @@ class SMTPSender:
         Returns ``(True, "")`` on success, ``(False, "reason")`` otherwise.
         Never raises.
 
-        TLS note: we use port 465 with ``use_tls=True`` (implicit TLS) \u2014
-        the socket is TLS-wrapped from the first byte, no STARTTLS upgrade.
-        We switched off 587/STARTTLS because Railway's outbound firewall
-        blocks :587, which timed out every onboarding SMTP verify in prod.
+        TLS note: we pass ``start_tls=True`` to the constructor so connect()
+        performs the STARTTLS upgrade atomically on port 587. Calling
+        ``smtp.starttls()`` afterwards would raise "Connection already using
+        TLS" because aiosmtplib's connect() already upgraded the channel.
         """
         smtp = aiosmtplib.SMTP(
             hostname=_HOST,
             port=_PORT,
-            use_tls=True,
+            start_tls=True,
             timeout=10.0,
         )
         try:
