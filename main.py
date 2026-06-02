@@ -142,6 +142,19 @@ async def amain() -> None:
     me = await bot.get_me()
     log.info("bot online as @%s (id=%s)", me.username, me.id)
 
+    # Deployment-trace breadcrumb: print the exact SMTP port the live
+    # container will dial. If onboarding reports a port other than this in
+    # an SMTPConnectTimeoutError, the running image is NOT this code \u2014
+    # check Railway's "active deployment" vs the latest commit.
+    try:
+        from core.mailer import smtp_sender as _smtp_mod
+        log.info(
+            "SMTP config: host=%s port=%s (module=%s)",
+            _smtp_mod._HOST, _smtp_mod._PORT, _smtp_mod.__file__,
+        )
+    except Exception:
+        log.exception("SMTP config breadcrumb failed (non-fatal)")
+
     # Register the slash-command list with Telegram so the Menu button at
     # the bottom-left of every chat shows them automatically. set_my_commands
     # is idempotent \u2014 cheap to call on every startup, and updates the list
