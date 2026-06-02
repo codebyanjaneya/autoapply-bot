@@ -245,12 +245,12 @@ _PROMPTS: dict[str, tuple[str, State]] = {
         Settings.NAME,
     ),
     "roles": (
-        "Send your new <b>roles</b>, comma-separated (max 5), or /cancel.\n"
+        "Send your new <b>roles</b> (max 5), or /cancel.\n"
         "e.g. <code>python developer, backend engineer, ai engineer</code>",
         Settings.ROLES,
     ),
     "locations": (
-        "Send your new <b>locations</b>, comma-separated, or /cancel.\n"
+        "Send your new <b>locations</b>, or /cancel.\n"
         "e.g. <code>Bengaluru, Hyderabad, Remote</code>",
         Settings.LOCATIONS,
     ),
