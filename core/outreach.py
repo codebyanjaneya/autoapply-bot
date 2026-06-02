@@ -30,7 +30,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.enrich.hunter import HunterQuotaExhausted, Recruiter
 from core.enrich.recruiter_finder import RecruiterFinder
-from core.mailer.smtp_sender import SMTPSender
+from core.mailer import AnySender
+from core.mailer.smtp_sender import SMTPSender  # noqa: F401  (kept for back-compat imports)
 from core.models import Application, AppStatus, Job, OutreachLog, UserContact
 from core.repositories import rate_limits as rl
 from core.tenant import TenantContext
@@ -55,7 +56,7 @@ async def send_outreach_for_application(
     application_id: int,
     *,
     hunter: RecruiterFinder,
-    smtp: SMTPSender,
+    smtp: AnySender,
     daily_outreach_limit: int,
     no_send: bool = False,
     manual_contacts: dict[str, UserContact] | None = None,
@@ -178,6 +179,10 @@ async def send_outreach_for_application(
             subject=subject,
             body=body,
             from_name=ctx.credentials.candidate_name or ctx.user.first_name,
+            # Required for Resend (we send from our verified domain, so
+            # replies must be routed back to the user). Harmless for SMTP
+            # \u2014 it just adds a Reply-To header equal to the From envelope.
+            reply_to=ctx.credentials.smtp_email,
             attachment=ctx.credentials.resume_pdf,
             attachment_filename=ctx.credentials.resume_filename,
         )

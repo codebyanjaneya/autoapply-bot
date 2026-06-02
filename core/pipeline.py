@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.db import get_session
 from core.enrich.recruiter_finder import build_recruiter_finder
+from core.mailer import build_outreach_sender, is_managed_sending
 from core.mailer.smtp_sender import SMTPSender
 from core.models import DailyRunSummary, JobSource
 from core.outreach import OutreachOutcome, send_outreach_for_application
@@ -241,18 +242,30 @@ async def _run_outreach_phase(ctx: TenantContext, *, no_send: bool = False) -> t
     if hunter is None:
         return (0, 0, 0, False)
 
-    # SMTPSender is built per-user from their encrypted Gmail app password.
+    # Pick the right sender. Managed mode (RESEND_API_KEY set) returns a
+    # ResendSender bound to our verified domain; self-hosted mode returns
+    # a per-user SMTPSender from the user's encrypted Gmail app password.
     # In no-send mode we still need a sender object for the
-    # `async with sender:` lifecycle below; it's never actually invoked
+    # ``async with sender:`` lifecycle below; it's never actually invoked
     # because send_outreach_for_application short-circuits on no_send.
-    sender = SMTPSender.from_credentials(ctx.credentials)
+    sender = build_outreach_sender(ctx)
     if sender is None:
         if no_send:
-            log.info("user %s has no SMTP creds; proceeding in NO-SEND mode with stub", ctx.user_id)
+            log.info("user %s has no sender configured; proceeding in NO-SEND mode with stub", ctx.user_id)
             sender = SMTPSender(email="dry-run@example.invalid", password="unused")
+        elif is_managed_sending():
+            # Managed mode but Resend env is incomplete — caller already
+            # logged the cause in build_outreach_sender. Skip outreach.
+            return (0, 0, 0, False)
         else:
             log.info("user %s has no SMTP credentials; outreach skipped", ctx.user_id)
             return (0, 0, 0, False)
+
+    # Resend needs the user's email for the Reply-To header. SMTP relies
+    # on it for the envelope sender. Either way, no email == no outreach.
+    if not getattr(ctx.credentials, "smtp_email", None) and not no_send:
+        log.info("user %s has no reply-to email; outreach skipped", ctx.user_id)
+        return (0, 0, 0, False)
 
     # Pre-load the user's manual contact list ONCE per run, keyed by
     # lower(company). Each per-send call gets the same map so a hit avoids

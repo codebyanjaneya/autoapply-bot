@@ -48,6 +48,7 @@ from aiogram.types import Message
 
 from core.crypto import encrypt
 from core.db import get_session
+from core.mailer import is_managed_sending
 from core.mailer.smtp_sender import SMTPSender
 from core.models import (
     SubscriptionTier, User, UserCredentials, UserPreferences, UserStatus,
@@ -164,6 +165,22 @@ async def _prompt_resume(message: Message, state: FSMContext) -> None:
 
 async def _prompt_smtp_email(message: Message, state: FSMContext) -> None:
     await state.set_state(Onboarding.SMTP_EMAIL)
+    if is_managed_sending():
+        # Managed mode: we send from our own verified domain. The user's
+        # email is only used as the Reply-To header so recruiter replies
+        # land in their inbox. No Gmail / app-password setup needed.
+        await message.answer(
+            "<b>Step 5/5</b> \u2014 Your email address (for recruiter replies)\n"
+            "\n"
+            "AutoApply sends outreach on your behalf from our verified domain. "
+            "When a recruiter hits <b>Reply</b>, the message goes <i>straight "
+            "to this inbox</i> \u2014 we never see it.\n"
+            "\n"
+            "Send your email address below \u2014 e.g. <code>you@gmail.com</code>. "
+            "Any provider works (Gmail, Outlook, custom domain).",
+            disable_web_page_preview=True,
+        )
+        return
     await message.answer(
         f"<b>Step 5/6</b> \u2014 Gmail address for sending outreach emails\n"
         f"\n"
@@ -260,8 +277,11 @@ async def _ask_next(message: Message, state: FSMContext) -> None:
     if not (creds and creds.smtp_email):
         await _prompt_smtp_email(message, state)
         return
-    # Step 6 \u2014 SMTP app password (encrypted blob in DB)
-    if not (creds and creds.smtp_password_encrypted):
+    # Step 6 \u2014 SMTP app password (encrypted blob in DB).
+    # Skipped entirely when managed sending (Resend) is active: we send
+    # from our own verified domain, the user's email is used only as the
+    # Reply-To header so recruiter replies still land in their inbox.
+    if not is_managed_sending() and not (creds and creds.smtp_password_encrypted):
         await _prompt_smtp_password(message, state, smtp_email=creds.smtp_email)
         return
 
