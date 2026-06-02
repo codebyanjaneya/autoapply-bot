@@ -35,7 +35,8 @@ from sqlalchemy import select
 
 from core.db import get_session
 from core.models import (
-    Application, DailyRunSummary, Job, OutreachLog, User, UserPreferences, UserStatus,
+    Application, DailyRunSummary, Job, OutreachLog, User, UserPreferences,
+    UserReview, UserStatus,
 )
 from core.pipeline import run_pipeline_for_user
 from core.tenant import load_tenant_context
@@ -148,6 +149,15 @@ async def _run_one_user(bot: Bot, user_id: int) -> None:
         # De-dupe while preserving order (one company can have multiple jobs).
         _seen: set[str] = set()
         companies_today = [c for c in companies_today if not (c in _seen or _seen.add(c))]
+        # Review-nudge inputs: account age (days) and whether the user has
+        # already left a review. Cheap two-query check; review row is keyed
+        # uniquely on user_id so .scalar() is exact.
+        signup_at = ctx.user.created_at
+        now_utc = datetime.now(timezone.utc)
+        days_since_signup = max(0, (now_utc - signup_at).days) if signup_at else 0
+        has_review = (await session.execute(
+            select(UserReview.id).where(UserReview.user_id == user_id).limit(1)
+        )).first() is not None
         # Capture values we'll use after the session closes \u2014 the ORM
         # instance becomes unusable post-commit.
         snapshot = {
@@ -159,6 +169,8 @@ async def _run_one_user(bot: Bot, user_id: int) -> None:
             "hunter_quota_exhausted": getattr(summary, "hunter_quota_exhausted", False),
             "no_recruiter": getattr(summary, "no_recruiter_count", 0),
             "companies_today": companies_today,
+            "days_since_signup": days_since_signup,
+            "has_review": has_review,
             "tier": ctx.user.subscription_tier.value,
         }
         # session commits on context exit
@@ -220,6 +232,25 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
             "emails with /add_contacts — we'll reach out for you directly "
             "next run, no Hunter lookup needed.</i>"
         )
+    # Review nudges \u2014 gated on !has_review so they stop the moment the
+    # user actually leaves one. Two flavours:
+    #   1. "7-day" nudge: once the user has been around a week, we ask on
+    #      every run until they review.
+    #   2. "Occasional" nudge: on successful runs (sent>0) and before the
+    #      7-day mark, fire roughly every 4th day so we don't pester after
+    #      day 1. Skipped when the 7-day nudge already fires.
+    if not snapshot["error"] and not snapshot.get("has_review"):
+        days = snapshot.get("days_since_signup", 0)
+        if days >= 7:
+            text += (
+                "\n\n\U0001f49b <i>Enjoying AutoApply? Leave a review with "
+                "/review \u2014 it helps a lot!</i>"
+            )
+        elif snapshot.get("sent", 0) > 0 and days >= 2 and (days % 4 == 0):
+            text += (
+                "\n\n\U0001f4ac <i>Got a minute? /review \u2014 your feedback "
+                "shapes the bot.</i>"
+            )
     if snapshot.get("hunter_quota_exhausted"):
         if snapshot.get("tier") == "paid":
             text += (

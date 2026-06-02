@@ -443,3 +443,28 @@ class UserContact(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "email", name="uq_user_contacts_user_email"),
     )
+
+
+# ---------- user-submitted reviews (/review) ----------
+class UserReview(Base):
+    """One-row-per-user rating + optional comment, updatable via /review.
+
+    UNIQUE(user_id) so re-running /review overwrites the previous review
+    (last-write-wins). Operator views aggregate via /reviews.
+    """
+    __tablename__ = "user_reviews"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, unique=True,
+    )
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)  # 1..5
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False,
+    )

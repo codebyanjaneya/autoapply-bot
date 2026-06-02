@@ -55,8 +55,8 @@ from aiogram.types import BotCommand  # noqa: E402
 from aiohttp import web  # noqa: E402
 
 from core.bot import (  # noqa: E402
-    commands_router, contacts_router, onboarding_router, settings_router,
-    support_router,
+    commands_router, contacts_router, onboarding_router, reviews_router,
+    settings_router, support_router,
 )
 from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
@@ -84,6 +84,7 @@ _BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="resume",         description="Resume daily runs"),
     BotCommand(command="restart",        description="Redo onboarding"),
     BotCommand(command="support",        description="Report an issue \u2014 we reply in 24h"),
+    BotCommand(command="review",         description="Rate AutoApply \u2014 1 to 5 stars"),
     BotCommand(command="help",           description="All commands"),
 ]
 
@@ -101,6 +102,7 @@ async def amain() -> None:
     dp.include_router(settings_router)
     dp.include_router(contacts_router)
     dp.include_router(support_router)
+    dp.include_router(reviews_router)
     dp.include_router(commands_router)
 
     scheduler = build_scheduler(bot=bot)
