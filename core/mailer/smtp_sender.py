@@ -121,34 +121,20 @@ class SMTPSender:
         )
 
     async def verify(self) -> tuple[bool, str]:
-        """Quick connect+STARTTLS+login+quit cycle to validate credentials.
+        """No-op stub. Always returns ``(True, "")`` without touching the network.
 
-        Used by the onboarding wizard so the user finds out *immediately* if
-        their app password is wrong, instead of discovering it tomorrow when
-        the scheduler's pipeline silently fails on every outreach.
+        Background: Railway (and several other PaaS providers) block all
+        outbound SMTP at the network layer. The original implementation did
+        a live connect+login round-trip against smtp.gmail.com so the user
+        would discover a bad app password during onboarding instead of
+        tomorrow. On Railway that round-trip times out and blocks every
+        user from completing the wizard.
 
-        Returns ``(True, "")`` on success, ``(False, "reason")`` otherwise.
-        Never raises.
+        Trade-off: bad app passwords now surface only at the first real
+        outreach send (logged to OutreachLog.status = 'failed'). That's the
+        correct trade-off because no-network beats no-onboarding.
 
-        TLS note: we pass ``use_tls=True`` to the constructor so connect()
-        performs the STARTTLS upgrade atomically on port 587. Calling
-        ``smtp.starttls()`` afterwards would raise "Connection already using
-        TLS" because aiosmtplib's connect() already upgraded the channel.
+        Signature is preserved so onboarding/settings call sites keep
+        working unchanged.
         """
-        smtp = aiosmtplib.SMTP(
-            hostname=_HOST,
-            port=_PORT,
-            use_tls=True,
-            timeout=10.0,
-        )
-        try:
-            await smtp.connect()
-            await smtp.login(self.email, self._password)
-        except Exception as e:
-            return False, f"{type(e).__name__}: {e}"
-        finally:
-            try:
-                await smtp.quit()
-            except Exception:
-                pass  # quit failures don't invalidate the test
         return True, ""
