@@ -1,4 +1,4 @@
-"""Async SMTP sender using the user's own Gmail app password.
+﻿"""Async SMTP sender using the user's own Gmail app password.
 
 Architecture:
 - Each user provides their own SMTP credentials at onboarding (Gmail app
@@ -65,7 +65,7 @@ class SMTPSender:
         )
 
     async def __aenter__(self) -> "SMTPSender":
-        # No connection pool — every send opens its own SMTP session.
+        # No connection pool â€” every send opens its own SMTP session.
         # Implementing the context-manager protocol lets pipeline.py treat
         # SMTPSender and ResendSender interchangeably (``async with sender:``).
         return self
@@ -84,13 +84,13 @@ class SMTPSender:
         attachment: bytes | None = None,
         attachment_filename: str | None = None,
     ) -> None:
-        """Send one email. Raises aiosmtplib.SMTPException on failure — caller
+        """Send one email. Raises aiosmtplib.SMTPException on failure â€” caller
         is expected to catch and log to OutreachLog.
 
         ``reply_to`` / ``from_name`` are accepted for parity with
         :class:`core.mailer.resend_sender.ResendSender`. With Gmail SMTP the
         From: address IS the user's own inbox, so replies naturally land
-        there — ``reply_to`` only sets an explicit Reply-To header when the
+        there â€” ``reply_to`` only sets an explicit Reply-To header when the
         caller wants replies routed somewhere else (rarely used).
         """
         display_name = from_name or self.from_name
@@ -138,3 +138,5 @@ class SMTPSender:
         working unchanged.
         """
         return True, ""
+
+
