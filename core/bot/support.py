@@ -25,7 +25,12 @@ from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from core.db import get_session
 from core.models import User
@@ -41,6 +46,15 @@ _MAX_ISSUE_CHARS = 3500
 
 class Support(StatesGroup):
     WAITING_ISSUE = State()
+
+
+class OperatorReply(StatesGroup):
+    """FSM for the operator's side of the support thread. Entered when the
+    operator taps the inline "Reply to User" button on a forwarded support
+    request; the next text message they send is delivered to that user.
+    """
+
+    WAITING_REPLY = State()
 
 
 def _operator_chat_id() -> int | None:
@@ -125,8 +139,16 @@ async def support_collect_issue(message: Message, state: FSMContext) -> None:
             message.from_user.id, truncated,
         )
     else:
+        # Inline button lets the operator start a reply right from the
+        # forwarded message \u2014 no copy/pasting user IDs around.
+        reply_kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="\U0001f4ac Reply to User",
+                callback_data=f"support_reply:{message.from_user.id}",
+            )
+        ]])
         try:
-            await message.bot.send_message(op_id, operator_text)
+            await message.bot.send_message(op_id, operator_text, reply_markup=reply_kb)
             forwarded = True
             log.info("support: forwarded issue from user %s to operator",
                      message.from_user.id)
@@ -148,3 +170,84 @@ async def support_collect_issue(message: Message, state: FSMContext) -> None:
         # (logs), even though the Telegram bridge didn't fire.
         log.warning("support: user %s received ACK without operator forward",
                     message.from_user.id)
+
+
+# ---------------------------------------------------------------------------
+# Operator reply path
+# ---------------------------------------------------------------------------
+# When the operator taps the "Reply to User" button on a forwarded support
+# message, we stash the target user_id in FSM state and capture the next
+# text message the operator sends, delivering it to that user as a
+# branded "Message from AutoApply Support" DM.
+
+def _is_operator(chat_id: int | None) -> bool:
+    op_id = _operator_chat_id()
+    return op_id is not None and chat_id == op_id
+
+
+@router.callback_query(F.data.startswith("support_reply:"))
+async def cb_support_reply(cb: CallbackQuery, state: FSMContext) -> None:
+    # Defence-in-depth: only the operator may use this button. The button
+    # is only ever shown in the operator's chat, but Telegram lets anyone
+    # who learns the callback_data trigger it, so we re-check.
+    if not _is_operator(cb.from_user.id if cb.from_user else None):
+        await cb.answer("Not authorized.", show_alert=True)
+        return
+
+    raw = cb.data or ""
+    try:
+        target_user_id = int(raw.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await cb.answer("Malformed reply button.", show_alert=True)
+        return
+
+    await state.set_state(OperatorReply.WAITING_REPLY)
+    await state.update_data(target_user_id=target_user_id)
+    await cb.answer()
+    if cb.message is not None:
+        await cb.message.answer(
+            f"\u270d\ufe0f Type your reply to user <code>{target_user_id}</code>.\n"
+            f"Send /cancel to abort."
+        )
+
+
+@router.message(Command("cancel"), StateFilter(OperatorReply.WAITING_REPLY))
+async def cmd_operator_reply_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("Reply cancelled.")
+
+
+@router.message(StateFilter(OperatorReply.WAITING_REPLY), F.text)
+async def operator_reply_send(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    target_user_id = data.get("target_user_id")
+    operator_text = (message.text or "").strip()
+
+    if not target_user_id or not operator_text:
+        await state.clear()
+        await message.answer(
+            "\u26a0\ufe0f Missing target user or empty reply. State cleared \u2014 "
+            "tap \"Reply to User\" again to retry."
+        )
+        return
+
+    delivery = (
+        "\U0001f4e9 <b>Message from AutoApply Support:</b>\n\n"
+        f"{operator_text}"
+    )
+    try:
+        await message.bot.send_message(int(target_user_id), delivery)
+    except TelegramAPIError as e:
+        log.exception("support: failed delivering operator reply to user %s",
+                      target_user_id)
+        await state.clear()
+        await message.answer(
+            f"\u274c Could not deliver to <code>{target_user_id}</code>: "
+            f"{type(e).__name__}. They may have blocked the bot."
+        )
+        return
+
+    await state.clear()
+    await message.answer(f"\u2705 Reply sent to user <code>{target_user_id}</code>.")
+    log.info("support: operator delivered reply to user %s (%d chars)",
+             target_user_id, len(operator_text))
