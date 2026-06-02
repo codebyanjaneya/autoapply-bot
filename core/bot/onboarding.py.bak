@@ -513,7 +513,9 @@ async def step_smtp_password(message: Message, state: FSMContext) -> None:
 
     # Verify against Gmail BEFORE we persist \u2014 saves users from discovering
     # tomorrow that their password was wrong all along.
-    ok, reason = True, ""
+    verifying = await message.answer("\U0001f50d Verifying with Gmail\u2026")
+    sender = SMTPSender(email=smtp_email, password=password)
+    ok, reason = await sender.verify()
     try:
         await verifying.delete()
     except Exception:
