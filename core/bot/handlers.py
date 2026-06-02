@@ -38,7 +38,8 @@ async def cmd_help(message: Message) -> None:
         "<b>AutoApply Bot</b>\n\n"
         "Tap the <b>Menu</b> button (bottom-left of the chat) to see "
         "every command \u2014 you don't need to memorise any of them.\n\n"
-        "New here? Try /howitworks for a quick walkthrough."
+        "New here? Try /howitworks for a quick walkthrough.\n\n"
+        "\U0001f6df <b>Need help?</b> Run /support \u2014 we reply within 24 hours."
     )
 
 

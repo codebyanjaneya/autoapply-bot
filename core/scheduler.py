@@ -172,7 +172,8 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
         text = (
             f"\u26a0\ufe0f Today's run had an error: <code>{snapshot['error'][:200]}</code>\n"
             f"Scraped {snapshot['scraped']}, scored {snapshot['scored']}, "
-            f"sent {snapshot['sent']}. /status for details."
+            f"sent {snapshot['sent']}. /status for details.\n\n"
+            f"\U0001f6df Need a hand? /support \u2014 we reply within 24h."
         )
     elif snapshot["sent"] == 0 and snapshot["scraped"] == 0:
         text = (

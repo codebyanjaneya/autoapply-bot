@@ -584,6 +584,7 @@ async def _finish_onboarding(message: Message, state: FSMContext) -> None:
         f"\u2022 /pause  \u2014 pause daily runs\n"
         f"\u2022 /resume \u2014 resume\n"
         f"\u2022 /referral \u2014 invite friends, earn free months\n"
-        f"\u2022 /help   \u2014 all commands"
+        f"\u2022 /help   \u2014 all commands\n\n"
+        f"\U0001f6df Having issues? /support is always available \u2014 we reply within 24h."
         f"{upgrade_footer}"
     )
