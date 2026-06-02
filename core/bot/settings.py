@@ -198,6 +198,12 @@ async def cmd_updaterole(message: Message, state: FSMContext) -> None:
     await _jump_to(message, state, "roles")
 
 
+@router.message(Command("updatelocation", "updatelocations"))
+async def cmd_updatelocation(message: Message, state: FSMContext) -> None:
+    """Shortcut: jump straight into the locations editor without /settings."""
+    await _jump_to(message, state, "locations")
+
+
 @router.message(Command("updateresume"))
 async def cmd_updateresume(message: Message, state: FSMContext) -> None:
     """Shortcut: jump straight into the resume-upload step."""
