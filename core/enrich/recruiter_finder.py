@@ -19,7 +19,8 @@ from typing import Any
 
 from core.enrich.apollo import ApolloClient, ApolloQuotaExhausted, build_apollo_client
 from core.enrich.hunter import (
-    HunterClient, HunterQuotaExhausted, Recruiter, build_hunter_client,
+    HunterClient, HunterEmailUndeliverable, HunterQuotaExhausted, Recruiter,
+    build_hunter_client,
 )
 from core.tenant import TenantContext
 
@@ -53,6 +54,13 @@ class RecruiterFinder:
                 result = await self.hunter.find_recruiter(company)
                 if result is not None:
                     return result
+            except HunterEmailUndeliverable as e:
+                # Verifier flagged this address as undeliverable/risky.
+                # Don't burn the Apollo quota chasing the same company —
+                # Apollo would likely surface the same domain's catch-all.
+                # Return None so the pipeline records no_recruiter and skips.
+                log.info("recruiter-finder: hunter verify blocked %s for company=%r; skipping send", e, company)
+                return None
             except HunterQuotaExhausted:
                 self._hunter_exhausted = True
                 log.warning("recruiter-finder: Hunter exhausted; using Apollo for remainder of run")

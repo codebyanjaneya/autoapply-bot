@@ -28,12 +28,29 @@ from core.tenant import TenantContext
 log = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.hunter.io/v2/domain-search"
+_VERIFY_URL = "https://api.hunter.io/v2/email-verifier"
+
+# Hunter email-verifier statuses we treat as a hard "do not send":
+# - undeliverable: mailbox doesn't exist / domain rejects
+# - risky:        catch-all, disposable, role-based; high bounce odds
+# Everything else (deliverable, unknown, or any unrecognised value) is
+# treated as send-OK so a flaky verifier never blocks outreach.
+_BLOCKING_VERIFY_STATUSES = frozenset({"undeliverable", "risky"})
 
 
 class HunterQuotaExhausted(Exception):
     """Raised when Hunter returns HTTP 429 — free plan's 25/month limit hit
     (or pooled key's monthly quota). Caller should stop the outreach loop
     and notify the user (free tier: pitch /upgrade; pool: alert operator)."""
+
+
+class HunterEmailUndeliverable(Exception):
+    """Raised when Hunter's email-verifier marks the candidate address as
+    ``undeliverable`` or ``risky``. The recruiter_finder catches this and
+    falls through to the next provider (Apollo) — and if nothing else
+    surfaces a valid email, the pipeline treats the job as no_recruiter
+    and skips sending. Net effect: protects sender reputation from known
+    bounces and spam-trap-prone catch-alls."""
 
 
 @dataclass(slots=True)
@@ -137,12 +154,48 @@ class HunterClient:
         full_name = " ".join(filter(None, [first.get("first_name"), first.get("last_name")])) or None
         log.info("hunter: company=%r domain=%r returned %d HR email(s); using %s (%s)",
                  company, resolved_domain, len(emails), first.get("value"), first.get("position") or "no-title")
+
+        # Verify deliverability before handing the address to the mailer.
+        # Fails OPEN: any verifier error / quota issue lets the send proceed,
+        # so a flaky endpoint never breaks outreach. Only an explicit
+        # undeliverable/risky verdict blocks.
+        await self._verify_or_raise(first["value"])
+
         return Recruiter(
             email=first["value"],
             source=self.source_label,
             name=full_name,
             position=first.get("position"),
         )
+
+    async def _verify_or_raise(self, email: str) -> None:
+        assert self._client is not None
+        try:
+            resp = await self._client.get(
+                _VERIFY_URL,
+                params={"email": email, "api_key": self.api_key},
+            )
+        except httpx.HTTPError as e:
+            log.warning("hunter-verify: network error for %s: %s — failing open", email, e)
+            return
+
+        if resp.status_code >= 400:
+            log.warning("hunter-verify: HTTP %s for %s: %s — failing open",
+                        resp.status_code, email, resp.text[:200])
+            return
+
+        try:
+            data = (resp.json() or {}).get("data") or {}
+        except ValueError:
+            log.warning("hunter-verify: non-JSON body for %s — failing open", email)
+            return
+
+        status = (data.get("status") or "").lower()
+        if status in _BLOCKING_VERIFY_STATUSES:
+            log.info("hunter-verify: %s -> status=%s, blocking send", email, status)
+            raise HunterEmailUndeliverable(f"{email}: {status}")
+
+        log.info("hunter-verify: %s -> status=%s, ok to send", email, status or "unknown")
 
 
 def build_hunter_client(ctx: TenantContext) -> HunterClient | None:
