@@ -245,6 +245,23 @@ def _render_email(
     ) if app.score_reason else ""
 
     subject = f"{job.title} role at {job.company} \u2014 {candidate}"
+
+    # User-supplied template overrides the default body. Only the whitelisted
+    # placeholders are substituted; anything else in the user's template is
+    # left as a literal. Falls back to the built-in body if .format raises
+    # (e.g. user typed an unsupported placeholder like {salary}).
+    if ctx.credentials.email_template:
+        try:
+            body = ctx.credentials.email_template.format(
+                candidate_name=candidate,
+                role=job.title,
+                company=job.company,
+            )
+            return subject, body
+        except (KeyError, IndexError, ValueError) as e:
+            log.warning("outreach: custom template render failed for user %s (%s); "
+                        "falling back to default", ctx.user.id, e)
+
     body = (
         f"{salutation}\n"
         f"\n"

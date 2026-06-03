@@ -55,8 +55,9 @@ from aiogram.types import BotCommand  # noqa: E402
 from aiohttp import web  # noqa: E402
 
 from core.bot import (  # noqa: E402
-    commands_router, contacts_router, feedback_router, onboarding_router,
-    reviews_router, sendto_router, settings_router, support_router,
+    bulksend_router, commands_router, contacts_router, feedback_router,
+    onboarding_router, reviews_router, sendto_router, settemplate_router,
+    settings_router, support_router,
 )
 from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
@@ -72,6 +73,8 @@ _BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="updatelocations",description="Quick: change locations to search"),    BotCommand(command="updateresume",   description="Quick: upload a new resume PDF"),
     BotCommand(command="add_contacts",   description="Add recruiter emails you know"),
     BotCommand(command="sendto",         description="Send a one-off outreach to a contact"),
+    BotCommand(command="bulksend",       description="Send outreach to multiple contacts at once"),
+    BotCommand(command="settemplate",    description="Customize your outreach email template"),
     BotCommand(command="contacts",       description="View saved recruiter contacts"),
     BotCommand(command="clear_contacts", description="Remove all saved contacts"),
     BotCommand(command="settime",        description="Change your daily run time"),
@@ -105,6 +108,8 @@ async def amain() -> None:
     dp.include_router(support_router)
     dp.include_router(feedback_router)
     dp.include_router(sendto_router)
+    dp.include_router(bulksend_router)
+    dp.include_router(settemplate_router)
     dp.include_router(reviews_router)
     dp.include_router(commands_router)
 

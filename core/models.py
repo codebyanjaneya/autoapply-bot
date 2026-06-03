@@ -177,6 +177,12 @@ class UserCredentials(Base):
 
     candidate_name: Mapped[str | None] = mapped_column(String(128))
 
+    # Optional user-supplied outreach template. When set, overrides the
+    # default body in core/outreach._render_email. Rendered via str.format
+    # with the whitelisted placeholders {candidate_name}, {role}, {company}.
+    # NULL = use the built-in template.
+    email_template: Mapped[str | None] = mapped_column(Text)
+
     user: Mapped[User] = relationship(back_populates="credentials")
 
 
