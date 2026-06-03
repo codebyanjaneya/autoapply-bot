@@ -5,8 +5,10 @@ Architecture:
   password, 16 chars from https://myaccount.google.com/apppasswords).
 - We store the password encrypted on UserCredentials.smtp_password_encrypted
   (Fernet, see core/crypto.py).
-- At send time we decrypt, send via aiosmtplib over STARTTLS:587, and
-  discard the plaintext immediately.
+- At send time we decrypt, send via aiosmtplib over implicit TLS on :465,
+  and discard the plaintext immediately. Port 465 (SMTPS) is used instead
+  of 587/STARTTLS because Railway and several other PaaS hosts block
+  outbound :587 but allow :465.
 - The From: address is the user's own email \u2014 essential for DKIM/SPF
   alignment and to avoid "via gmail.com" warnings in the recipient's client.
 
@@ -30,7 +32,7 @@ from core.models import UserCredentials
 log = logging.getLogger(__name__)
 
 _HOST = "smtp.gmail.com"
-_PORT = 465  # STARTTLS (plain socket upgraded to TLS via EHLO)
+_PORT = 465  # implicit TLS (SMTPS). Railway blocks :587, but allows :465.
 _TIMEOUT = 30.0  # seconds; Gmail occasionally takes a beat
 
 
@@ -121,22 +123,30 @@ class SMTPSender:
         )
 
     async def verify(self) -> tuple[bool, str]:
-        """No-op stub. Always returns ``(True, "")`` without touching the network.
+        """Live connect + login round-trip against Gmail.
 
-        Background: Railway (and several other PaaS providers) block all
-        outbound SMTP at the network layer. The original implementation did
-        a live connect+login round-trip against smtp.gmail.com so the user
-        would discover a bad app password during onboarding instead of
-        tomorrow. On Railway that round-trip times out and blocks every
-        user from completing the wizard.
-
-        Trade-off: bad app passwords now surface only at the first real
-        outreach send (logged to OutreachLog.status = 'failed'). That's the
-        correct trade-off because no-network beats no-onboarding.
-
-        Signature is preserved so onboarding/settings call sites keep
-        working unchanged.
+        Returns ``(True, "")`` on success, ``(False, <reason>)`` on any
+        SMTP / network failure. Used by onboarding so a bad app password
+        is caught at setup time, not at tomorrow's first real send.
         """
+        client = aiosmtplib.SMTP(
+            hostname=_HOST,
+            port=_PORT,
+            use_tls=True,
+            timeout=_TIMEOUT,
+        )
+        try:
+            await client.connect()
+            await client.login(self.email, self._password)
+        except aiosmtplib.SMTPException as e:
+            return False, f"{type(e).__name__}: {e}"
+        except (OSError, TimeoutError) as e:
+            return False, f"network: {type(e).__name__}: {e}"
+        finally:
+            try:
+                await client.quit()
+            except Exception:
+                pass
         return True, ""
 
 
