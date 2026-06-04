@@ -69,7 +69,7 @@ _BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="start",          description="Set up your job hunt"),
     BotCommand(command="howitworks",     description="How the bot works"),    BotCommand(command="run",            description="Trigger your pipeline right now"),    BotCommand(command="status",         description="Today's run summary"),
     BotCommand(command="history",        description="All outreach so far (paginated)"),
-    BotCommand(command="updaterole",     description="Quick: change roles to search"),    BotCommand(command="updatelocation", description="Quick: change locations to search"),
+    BotCommand(command="updaterole",     description="Quick: change roles to search"),
     BotCommand(command="updatelocations",description="Quick: change locations to search"),    BotCommand(command="updateresume",   description="Quick: upload a new resume PDF"),
     BotCommand(command="add_contacts",   description="Add recruiter emails you know"),
     BotCommand(command="sendto",         description="Send a one-off outreach to a contact"),
