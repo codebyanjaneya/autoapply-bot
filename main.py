@@ -57,7 +57,7 @@ from aiohttp import web  # noqa: E402
 from core.bot import (  # noqa: E402
     bulksend_router, commands_router, contacts_router, feedback_router,
     onboarding_router, reviews_router, sendto_router, settemplate_router,
-    settings_router, support_router,
+    settings_router, stats_router, support_router,
 )
 from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
@@ -111,6 +111,7 @@ async def amain() -> None:
     dp.include_router(bulksend_router)
     dp.include_router(settemplate_router)
     dp.include_router(reviews_router)
+    dp.include_router(stats_router)
     dp.include_router(commands_router)
 
     scheduler = build_scheduler(bot=bot)
