@@ -38,6 +38,17 @@ _VERIFY_URL = "https://api.hunter.io/v2/email-verifier"
 _BLOCKING_VERIFY_STATUSES = frozenset({"undeliverable", "risky"})
 
 
+def _verify_emails_enabled() -> bool:
+    """Whether to hit the /email-verifier endpoint after each domain-search.
+
+    OFF by default — verification doubles the per-lookup API cost (1 search
+    + 1 verify) which halves the free plan's 25/month quota. Flip
+    ``HUNTER_VERIFY_EMAILS=true`` once we move to a paid Hunter plan with
+    headroom.
+    """
+    return os.environ.get("HUNTER_VERIFY_EMAILS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class HunterQuotaExhausted(Exception):
     """Raised when Hunter returns HTTP 429 — free plan's 25/month limit hit
     (or pooled key's monthly quota). Caller should stop the outreach loop
@@ -156,10 +167,11 @@ class HunterClient:
                  company, resolved_domain, len(emails), first.get("value"), first.get("position") or "no-title")
 
         # Verify deliverability before handing the address to the mailer.
-        # Fails OPEN: any verifier error / quota issue lets the send proceed,
-        # so a flaky endpoint never breaks outreach. Only an explicit
-        # undeliverable/risky verdict blocks.
-        await self._verify_or_raise(first["value"])
+        # Opt-in via HUNTER_VERIFY_EMAILS=true — each verify call burns one
+        # more unit of Hunter quota, so default-off keeps the monthly cap
+        # intact. Fails OPEN: any verifier error lets the send proceed.
+        if _verify_emails_enabled():
+            await self._verify_or_raise(first["value"])
 
         return Recruiter(
             email=first["value"],
