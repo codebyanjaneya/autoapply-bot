@@ -21,7 +21,7 @@ from aiogram.types import Message
 
 from core.crypto import encrypt
 from core.db import get_session
-from core.models import UserCredentials
+from core.models import SubscriptionTier, User, UserCredentials
 
 log = logging.getLogger(__name__)
 router = Router(name="hunterkey")
@@ -36,8 +36,26 @@ class SetHunterKey(StatesGroup):
     WAITING_KEY = State()
 
 
+_PRO_GATE_MESSAGE = (
+    "🔒 This is a Pro feature.\n\n"
+    "Pro users get their own Hunter.io quota — 25 recruiter searches/month "
+    "guaranteed, never shared with other users.\n\n"
+    "Upgrade with /upgrade to unlock this."
+)
+
+
+async def _is_paid(user_id: int) -> bool:
+    async with get_session() as session:
+        user = await session.get(User, user_id)
+    return user is not None and user.subscription_tier == SubscriptionTier.paid
+
+
 @router.message(Command("sethunterkey"))
 async def cmd_sethunterkey(message: Message, state: FSMContext) -> None:
+    assert message.from_user is not None
+    if not await _is_paid(message.from_user.id):
+        await message.answer(_PRO_GATE_MESSAGE)
+        return
     await state.set_state(SetHunterKey.WAITING_KEY)
     await message.answer(
         "Enter your Hunter.io API key to get your own <b>25 free recruiter "
@@ -95,6 +113,9 @@ async def sethunterkey_save(message: Message, state: FSMContext) -> None:
 @router.message(Command("removehunterkey"))
 async def cmd_removehunterkey(message: Message) -> None:
     assert message.from_user is not None
+    if not await _is_paid(message.from_user.id):
+        await message.answer(_PRO_GATE_MESSAGE)
+        return
     async with get_session() as session:
         creds = await session.get(UserCredentials, message.from_user.id)
         if creds is None or creds.hunter_api_key_encrypted is None:

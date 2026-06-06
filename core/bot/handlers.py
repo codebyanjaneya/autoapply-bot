@@ -606,6 +606,7 @@ async def cmd_upgrade(message: Message) -> None:
         "\n"
         "<b>What \u20b9500/month buys you</b>\n"
         "\u2022 Recruiter lookups (no quota anxiety)\n"
+        "\u2022 Your own Hunter.io recruiter search quota (never runs out)\n"
         "\u2022 AI scoring of every job against your resume\n"
         "\u2022 Automated personalised outreach \u2014 15 emails/day\n"
         "\u2022 50 job scans/day across your roles & cities\n"

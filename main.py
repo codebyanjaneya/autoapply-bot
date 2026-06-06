@@ -75,7 +75,7 @@ _BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="sendto",         description="Send a one-off outreach to a contact"),
     BotCommand(command="bulksend",       description="Send outreach to multiple contacts at once"),
     BotCommand(command="settemplate",    description="Customize your outreach email template"),
-    BotCommand(command="sethunterkey",   description="Use your own Hunter.io key for recruiter search"),
+    BotCommand(command="sethunterkey",   description="Pro: connect your own Hunter.io key for guaranteed recruiter search"),
     BotCommand(command="removehunterkey",description="Remove your Hunter.io key"),
     BotCommand(command="contacts",       description="View saved recruiter contacts"),
     BotCommand(command="clear_contacts", description="Remove all saved contacts"),
