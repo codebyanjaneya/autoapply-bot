@@ -262,7 +262,7 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
             text += (
                 "\n\n\u26a0\ufe0f Our shared recruiter-lookup pool is tapped out "
                 "for today \u2014 a normal limit on the free tier. "
-                "<b>AutoApply Pro (\u20b9500/month)</b> gets priority on the pool "
+                "<b>AutoApply Pro (\u20b9700/month)</b> gets priority on the pool "
                 "today, plus 3x outreach and 2.5x scans.\n"
                 "\nTap /upgrade to see the full pitch."
             )
@@ -272,7 +272,7 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
     elif snapshot.get("tier") == "free":
         text += (
             "\n\n\u26a1 <i>Pro users get 3x more outreach emails (15/day) and "
-            "50 job scans/day for \u20b9500/month. /upgrade</i>"
+            "50 job scans/day for \u20b9700/month. /upgrade</i>"
         )
     # TODO(week-6): when /add_contacts ships, ALSO append the "know any
     # recruiters?" nudge whenever the run found candidates but couldn't

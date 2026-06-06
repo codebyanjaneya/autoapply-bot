@@ -6,7 +6,7 @@ Decisions (MVP):
   10k open links per account which is fine for 100s of users.
 - Expire links after 7 days. Long enough that someone can sleep on it,
   short enough that abandoned links don't pile up forever.
-- Amount: 50000 paise = INR 500. Hard-coded; if pricing ever changes we
+- Amount: 70000 paise = INR 700. Hard-coded; if pricing ever changes we
   add a `plans` table. Not worth abstracting for one tier.
 - `notes.user_id` is the **primary** way the webhook resolves payment ->
   user. `razorpay_payment_link_id` on the Subscription row is the
@@ -26,7 +26,7 @@ from core.payments.client import get_client, run_blocking
 
 log = logging.getLogger(__name__)
 
-PLAN_AMOUNT_PAISE = 50000   # \u20b9500.00
+PLAN_AMOUNT_PAISE = 70000   # \u20b9700.00
 PLAN_CURRENCY = "INR"
 PLAN_DESCRIPTION = "AutoApply Pro \u2014 1 month"
 LINK_EXPIRY_DAYS = 7

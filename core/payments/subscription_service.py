@@ -101,7 +101,7 @@ async def upgrade_to_paid(
     text = (
         "\U0001f389 <b>Welcome to AutoApply Pro!</b>\n"
         "\n"
-        f"Your payment of \u20b9500 is confirmed. You now have:\n"
+        f"Your payment of \u20b9700 is confirmed. You now have:\n"
         f"\u2705 {PAID_OUTREACH_PER_DAY} outreach emails/day "
         f"(was {FREE_OUTREACH_PER_DAY})\n"
         f"\u2705 {PAID_SCANS_PER_DAY} job scans/day "
@@ -154,7 +154,7 @@ async def expire_due_subscriptions(bot: Bot) -> None:
         "\u23f0 Your AutoApply Pro plan has expired \u2014 you're back on the Free tier "
         f"({FREE_OUTREACH_PER_DAY} outreach/day, {FREE_SCANS_PER_DAY} scans/day).\n"
         "\n"
-        "Tap /upgrade to renew for another month at \u20b9500."
+        "Tap /upgrade to renew for another month at \u20b9700."
     )
     for uid in downgraded:
         try:
@@ -187,7 +187,7 @@ async def send_expiry_reminders(bot: Bot) -> None:
     log.info("send_expiry_reminders: matched=%d", len(rows))
     text = (
         "\u23f0 Your AutoApply Pro plan expires in 3 days. "
-        "Tap /upgrade to renew for another month at \u20b9500."
+        "Tap /upgrade to renew for another month at \u20b9700."
     )
     for uid, chat_id in rows:
         try:

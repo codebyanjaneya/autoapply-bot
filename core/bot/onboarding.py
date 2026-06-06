@@ -591,7 +591,7 @@ async def _finish_onboarding(message: Message, state: FSMContext) -> None:
     upgrade_footer = (
         "\n\n<i>You're on the free plan \u2014 5 outreach/day, 20 scans/day. "
         "Most users find jobs faster on Pro (15 outreach + 50 scans + no Hunter "
-        "quota worries, \u20b9500/mo). Try /upgrade to see why.</i>"
+        "quota worries, \u20b9700/mo). Try /upgrade to see why.</i>"
         if tier == SubscriptionTier.free else ""
     )
     await message.answer(

@@ -94,7 +94,7 @@ async def cmd_howitworks(message: Message) -> None:
         "\n"
         "<b>Plans</b>\n"
         "\u2022 <b>Free</b>: 5 emails/day, 20 job scans\n"
-        "\u2022 <b>Pro (\u20b9500/month)</b>: 15 emails/day, 50 scans\n"
+        "\u2022 <b>Pro (\u20b9700/month)</b>: 15 emails/day, 50 scans\n"
         "\n"
         "Ready to start? Send /start\n"
         "See pricing: /upgrade\n"
@@ -596,15 +596,15 @@ async def cmd_upgrade(message: Message) -> None:
         "<b>\U0001f4b0 The math</b>\n"
         "<pre>"
         "Apollo Basic           \u20b9 4,000+/month\n"
-        "AutoApply Pro          \u20b9   500/month\n"
+        "AutoApply Pro          \u20b9   700/month\n"
         "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-        "You save               \u20b9 3,500/month\n"
+        "You save               \u20b9 3,300/month\n"
         "</pre>"
-        "<i>That's less than \u20b917/day \u2014 cheaper than a coffee, and you get "
+        "<i>That's less than \u20b924/day \u2014 cheaper than a coffee, and you get "
         "recruiter lookups <b>plus</b> the rest of the pipeline (scoring, outreach, "
         "reply tracking) Apollo doesn't do.</i>\n"
         "\n"
-        "<b>What \u20b9500/month buys you</b>\n"
+        "<b>What \u20b9700/month buys you</b>\n"
         "\u2022 Recruiter lookups (no quota anxiety)\n"
         "\u2022 Your own Hunter.io recruiter search quota (never runs out)\n"
         "\u2022 AI scoring of every job against your resume\n"
@@ -622,7 +622,7 @@ async def cmd_upgrade(message: Message) -> None:
         "Priority queue     no      yes\n"
         "</pre>"
         "\n"
-        f"<b>\u2192 Pay now (Razorpay, \u20b9500):</b>\n{short_url}\n\n"
+        f"<b>\u2192 Pay now (Razorpay, \u20b9700):</b>\n{short_url}\n\n"
         "<i>Link valid for 7 days. Pay with UPI / card / netbanking \u2014 your "
         "account upgrades automatically within seconds of payment.</i>\n"
         "\n"
@@ -661,7 +661,7 @@ async def cmd_subscription(message: Message) -> None:
         lines.append("Tap /upgrade within 3 days of expiry to renew.")
     else:
         lines.append("")
-        lines.append("Tap /upgrade to unlock Pro (\u20b9500/month).")
+        lines.append("Tap /upgrade to unlock Pro (\u20b9700/month).")
 
     await message.answer("\n".join(lines))
 
@@ -698,7 +698,7 @@ async def cmd_features(message: Message) -> None:
         "\n"
         "<b>The math</b>\n"
         "Apollo Basic alone is \u20b94,000+/month (and you still write the "
-        "emails yourself). AutoApply Pro is \u20b9500/month \u2014 cheaper than "
+        "emails yourself). AutoApply Pro is \u20b9700/month \u2014 cheaper than "
         "coffee, and you get the whole pipeline: scoring, outreach, reply "
         "tracking. Apollo enrichment is coming soon as a Pro perk.\n"
         "\n"
