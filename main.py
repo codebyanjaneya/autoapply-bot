@@ -56,8 +56,8 @@ from aiohttp import web  # noqa: E402
 
 from core.bot import (  # noqa: E402
     bulksend_router, commands_router, contacts_router, feedback_router,
-    onboarding_router, reviews_router, sendto_router, settemplate_router,
-    settings_router, stats_router, support_router,
+    onboarding_router, reviews_router, sendto_router, sethunterkey_router,
+    settemplate_router, settings_router, stats_router, support_router,
 )
 from core.payments import build_webhook_app  # noqa: E402
 from core.scheduler import build_scheduler  # noqa: E402
@@ -75,6 +75,8 @@ _BOT_COMMANDS: list[BotCommand] = [
     BotCommand(command="sendto",         description="Send a one-off outreach to a contact"),
     BotCommand(command="bulksend",       description="Send outreach to multiple contacts at once"),
     BotCommand(command="settemplate",    description="Customize your outreach email template"),
+    BotCommand(command="sethunterkey",   description="Use your own Hunter.io key for recruiter search"),
+    BotCommand(command="removehunterkey",description="Remove your Hunter.io key"),
     BotCommand(command="contacts",       description="View saved recruiter contacts"),
     BotCommand(command="clear_contacts", description="Remove all saved contacts"),
     BotCommand(command="settime",        description="Change your daily run time"),
@@ -110,6 +112,7 @@ async def amain() -> None:
     dp.include_router(sendto_router)
     dp.include_router(bulksend_router)
     dp.include_router(settemplate_router)
+    dp.include_router(sethunterkey_router)
     dp.include_router(reviews_router)
     dp.include_router(stats_router)
     dp.include_router(commands_router)

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from core.crypto import decrypt
 from core.enrich.domain_overrides import resolve_domain
 from core.tenant import TenantContext
 
@@ -67,7 +68,7 @@ class HunterEmailUndeliverable(Exception):
 @dataclass(slots=True)
 class Recruiter:
     email: str
-    source: str        # 'hunter' | 'hunter-pool' for analytics
+    source: str        # 'hunter-user' | 'hunter-pool' | 'apollo' for analytics
     name: str | None = None
     position: str | None = None
 
@@ -211,20 +212,34 @@ class HunterClient:
 
 
 def build_hunter_client(ctx: TenantContext) -> HunterClient | None:
-    """Return the operator's pooled Hunter client, or None if unconfigured.
+    """Return a Hunter client for this user, preferring their own key.
 
-    Hunter is OPERATOR-ONLY: users never supply their own key (Hunter's
-    signup requires a work email, which most job-seekers don't have). The
-    single ``HUNTER_API_KEY`` env var is shared across all bot users and
-    burns through its monthly cap fast, which is why we pair it with each
-    user's personal Apollo key as fallback (see RecruiterFinder).
+    Resolution order:
+      1. User's own key from ``user_credentials.hunter_api_key_encrypted``
+         (set via /sethunterkey). Free Hunter accounts give 25 lookups/month
+         per user, so this scales linearly with the user base.
+      2. Shared operator pool from env ``HUNTER_API_KEY``. Used as a
+         safety-net for users who haven't supplied their own key yet, and
+         was the only path historically.
+      3. None — Hunter disabled for this run, the finder falls back to Apollo.
 
-    The ``ctx`` argument is currently unused but kept on the signature so
-    we can re-introduce per-tenant routing later (e.g. paid users get a
-    bigger Hunter pool than free users) without touching call sites.
+    ``source_label`` on the returned client distinguishes 'hunter-user' vs
+    'hunter-pool' in OutreachLog rows so we can see in /stats how much of
+    the load each path carries.
     """
+    enc = ctx.credentials.hunter_api_key_encrypted
+    if enc is not None:
+        try:
+            user_key = decrypt(enc)
+        except Exception as e:
+            log.error("user %s Hunter key decrypt failed: %s — falling back to pool", ctx.user_id, e)
+        else:
+            log.info("hunter: user=%s using personal key", ctx.user_id)
+            return HunterClient(user_key, source_label="hunter-user")
+
     pool_key = os.environ.get("HUNTER_API_KEY")
     if not pool_key:
-        log.warning("HUNTER_API_KEY env not set; Hunter lookups disabled (will rely on Apollo only)")
+        log.warning("HUNTER_API_KEY env not set and user %s has no personal key; "
+                    "Hunter lookups disabled (will rely on Apollo only)", ctx.user_id)
         return None
     return HunterClient(pool_key, source_label="hunter-pool")
