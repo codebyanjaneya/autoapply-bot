@@ -172,6 +172,7 @@ async def _run_one_user(bot: Bot, user_id: int) -> None:
             "days_since_signup": days_since_signup,
             "has_review": has_review,
             "tier": ctx.user.subscription_tier.value,
+            "outreach_limit": ctx.user.daily_outreach_limit,
         }
         # session commits on context exit
 
@@ -260,15 +261,46 @@ async def _notify_user(bot: Bot, chat_id: int, snapshot: dict) -> None:
             )
         else:
             text += (
-                "\n\n\u26a0\ufe0f Our shared recruiter-lookup pool is tapped out "
-                "for today \u2014 a normal limit on the free tier. "
-                "<b>AutoApply Pro (\u20b9700/month)</b> gets priority on the pool "
-                "today, plus 3x outreach and 2.5x scans.\n"
-                "\nTap /upgrade to see the full pitch."
+                "\n\n\u26a0\ufe0f <b>Recruiter search quota ran out today \u2014 "
+                f"{snapshot.get('sent', 0)} emails sent.</b>\n"
+                "\n"
+                "This happens because you're on the Free plan sharing a "
+                "Hunter.io quota pool with other users.\n"
+                "\n"
+                "Fix it permanently with <b>Pro (\u20b9700/month)</b>:\n"
+                "\u2705 Add your own free Hunter.io key (/sethunterkey)\n"
+                "\u2705 Your personal quota \u2014 25 searches/month, never shared\n"
+                "\u2705 Get a free key at hunter.io in 1 minute\n"
+                "\n"
+                "Upgrade: /upgrade"
             )
+    # Free-tier outreach-limit-reached pitch: when a free user actually
+    # used up all 5 of their daily emails, hit them with the concrete
+    # "here's what you're missing" message instead of the generic nudge.
+    elif (
+        snapshot.get("tier") == "free"
+        and snapshot.get("outreach_limit")
+        and snapshot.get("sent", 0) >= snapshot["outreach_limit"]
+    ):
+        text += (
+            f"\n\n\U0001f6d1 <b>You've hit your free plan limit for today "
+            f"({snapshot['sent']} outreach emails sent).</b>\n"
+            "\n"
+            "Here's what's holding you back on Free:\n"
+            "\u2022 Only 5 outreach emails/day \u2014 Pro sends 15\n"
+            "\u2022 Shared recruiter search quota \u2014 can run out anytime\n"
+            "\u2022 No Hunter.io personal key support\n"
+            "\n"
+            "<b>Pro plan (\u20b9700/month)</b> fixes all of this:\n"
+            "\u2705 15 outreach emails/day (3x more)\n"
+            "\u2705 Your own Hunter.io key \u2014 never share quota again\n"
+            "\u2705 50 job scans/day vs 20\n"
+            "\n"
+            "Upgrade now: /upgrade"
+        )
     # Free-tier nudge: append a soft upsell to every daily summary so the
     # value gap stays top-of-mind. Skip when we already pitched (quota
-    # exhaustion above) to avoid double-asking in one message.
+    # exhaustion / outreach-limit above) to avoid double-asking in one message.
     elif snapshot.get("tier") == "free":
         text += (
             "\n\n\u26a1 <i>Pro users get 3x more outreach emails (15/day) and "
